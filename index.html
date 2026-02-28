@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Jungle Ventures — VC Intelligence Platform</title>
+  <meta name="description"
+    content="AI-powered deal sourcing and venture intelligence platform for Jungle Ventures. Track startups, valuations, theses, and portfolio health across India and Southeast Asia.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+  <div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-brand">
+        <span class="brand-icon">🌴</span>
+        <div>
+          <h1 class="brand-name">Jungle Ventures</h1>
+          <p class="brand-sub">Intelligence Platform</p>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <a href="#" class="nav-item active" data-section="dealflow" id="nav-dealflow">
+          <span class="nav-icon">🎯</span>
+          <span class="nav-label">Deal Flow</span>
+          <span class="nav-badge" id="deal-count-badge">0</span>
+        </a>
+        <a href="#" class="nav-item" data-section="deckanalyzer" id="nav-deckanalyzer">
+          <span class="nav-icon">📑</span>
+          <span class="nav-label">Deck Analyzer</span>
+        </a>
+        <a href="#" class="nav-item" data-section="valuation" id="nav-valuation">
+          <span class="nav-icon">📈</span>
+          <span class="nav-label">Valuation Intel</span>
+        </a>
+        <a href="#" class="nav-item" data-section="thesis" id="nav-thesis">
+          <span class="nav-icon">🧭</span>
+          <span class="nav-label">Thesis Tracker</span>
+        </a>
+        <a href="#" class="nav-item" data-section="portfolio" id="nav-portfolio">
+          <span class="nav-icon">👀</span>
+          <span class="nav-label">Portfolio HQ</span>
+        </a>
+        <a href="#" class="nav-item" data-section="powermoves" id="nav-powermoves">
+          <span class="nav-icon">🕵️</span>
+          <span class="nav-label">Power Moves</span>
+        </a>
+        <a href="#" class="nav-item" data-section="patterns" id="nav-patterns">
+          <span class="nav-icon">🧬</span>
+          <span class="nav-label">Pattern Engine</span>
+        </a>
+        <a href="#" class="nav-item" data-section="briefing" id="nav-briefing">
+          <span class="nav-icon">⚡</span>
+          <span class="nav-label">Daily Brief</span>
+          <span class="nav-badge pulse">NEW</span>
+        </a>
+        <a href="#" class="nav-item" data-section="integrations" id="nav-integrations">
+          <span class="nav-icon">⚙️</span>
+          <span class="nav-label">Integrations</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="date-display">
+          <span class="date-label">Report Date</span>
+          <span class="date-value" id="report-date"></span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- Header -->
+      <header class="main-header">
+        <div class="header-left">
+          <button class="menu-toggle" id="menu-toggle">☰</button>
+          <h2 class="page-title" id="page-title">Deal Flow Pipeline</h2>
+        </div>
+        <div class="header-right">
+          <div class="search-container">
+            <span class="search-icon">🔍</span>
+            <input type="text" class="search-input" id="search-input"
+              placeholder="Search startups, founders, sectors...">
+          </div>
+          <div class="filter-group">
+            <select class="filter-select" id="filter-geo">
+              <option value="All">All Regions</option>
+              <option value="India">🇮🇳 India</option>
+              <option value="Singapore">🇸🇬 Singapore</option>
+              <option value="Indonesia">🇮🇩 Indonesia</option>
+              <option value="Vietnam">🇻🇳 Vietnam</option>
+              <option value="Philippines">🇵🇭 Philippines</option>
+            </select>
+            <select class="filter-select" id="filter-sector">
+              <option value="All">All Sectors</option>
+              <option value="Consumer Tech">Consumer Tech</option>
+              <option value="B2B Manufacturing">B2B Manufacturing</option>
+            </select>
+            <select class="filter-select" id="filter-tier">
+              <option value="All">All Tiers</option>
+              <option value="tier-hot">🔥 Hot Deals</option>
+              <option value="tier-warm">⚡ Warm</option>
+              <option value="tier-watch">🧊 Watch List</option>
+            </select>
+          </div>
+        </div>
+      </header>
+
+      <!-- Content Area -->
+      <div class="content-area" id="content-area">
+        <!-- Dynamic content injected here -->
+      </div>
+    </main>
+  </div>
+
+  <!-- Modal Overlay -->
+  <div class="modal-overlay" id="modal-overlay">
+    <div class="modal-content" id="modal-content">
+      <!-- Dynamic modal content -->
+    </div>
+  </div>
+
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="https://apis.google.com/js/api.js" async defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+
+</html>
