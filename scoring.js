@@ -3,10 +3,10 @@
 // 5-Dimension scoring with composite ranking and thesis gen
 // ============================================================
 
-import { STARTUPS, SIGNAL_TYPES } from './data.js';
+// Uses globals: STARTUPS, SIGNAL_TYPES (from data.js)
 
 // Weights for composite score
-const WEIGHTS = {
+var WEIGHTS = {
     marketSize: 0.20,
     founderPedigree: 0.25,
     earlyTraction: 0.25,
@@ -171,4 +171,4 @@ function rankStartups(startups) {
         .map((s, i) => ({ ...s, rank: i + 1 }));
 }
 
-export { computeScores, generateThesis, rankStartups, WEIGHTS };
+// Globals: computeScores, generateThesis, rankStartups, WEIGHTS

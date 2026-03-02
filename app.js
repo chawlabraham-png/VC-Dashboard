@@ -2,26 +2,31 @@
 // Jungle Ventures — VC Intelligence Platform
 // Main Application Controller
 // ============================================================
+// Dependencies loaded via script tags:
+// - data.js (STARTUPS, SIGNAL_TYPES, GEOGRAPHIES, SECTORS)
+// - scoring.js (rankStartups, WEIGHTS)
+// - charts.js (createSparkline, createRadarChart, getScoreColor, getScoreClass, getBarColor)
+// - config.js (CONFIG)
 
-import { STARTUPS, SIGNAL_TYPES, GEOGRAPHIES, SECTORS } from './data.js';
-import { rankStartups, WEIGHTS } from './scoring.js';
-import { createSparkline, createRadarChart, getScoreColor, getScoreClass, getBarColor } from './charts.js';
-import CONFIG from './config.js';
+// ---- Config Fallback ----
+if (typeof CONFIG === 'undefined') {
+  var CONFIG = { supabaseUrl: '', supabaseKey: '', streakApiKey: '', googleClientId: '', gmailScopes: '' };
+}
 
 // ---- State ----
 let rankedStartups = [];
 let currentSection = 'dealflow';
-let filters = { geo: 'India', sector: 'All', tier: 'All', search: '' };
+let filters = { geo: 'All', sector: 'All', tier: 'All', search: '' };
 let uploadedDecks = [];
 
 // ---- Supabase ----
-const SUPABASE_URL = CONFIG.supabaseUrl;
-const SUPABASE_KEY = CONFIG.supabaseKey;
+const SUPABASE_URL = CONFIG.supabaseUrl || '';
+const SUPABASE_KEY = CONFIG.supabaseKey || '';
 let supabase = null;
 let supabaseConnected = false;
 
 // ---- Streak CRM ----
-const STREAK_API_KEY = CONFIG.streakApiKey;
+const STREAK_API_KEY = CONFIG.streakApiKey || '';
 let streakPipelines = [];
 
 // ---- Gmail OAuth ----
@@ -338,7 +343,7 @@ function init() {
   });
 
   // Bind filters
-  document.getElementById('filter-geo').value = 'India';
+  document.getElementById('filter-geo').value = 'All';
   document.getElementById('filter-geo').addEventListener('change', (e) => { filters.geo = e.target.value; renderCurrentSection(); });
   document.getElementById('filter-sector').addEventListener('change', (e) => { filters.sector = e.target.value; renderCurrentSection(); });
   document.getElementById('filter-tier').addEventListener('change', (e) => { filters.tier = e.target.value; renderCurrentSection(); });
@@ -373,7 +378,17 @@ function switchSection(section) {
     powermoves: 'Power Moves & Signals',
     patterns: 'Pattern Recognition Engine',
     briefing: 'Daily Intelligence Brief',
-    integrations: 'Integrations Hub'
+    integrations: 'Integrations Hub',
+    meetingprep: 'Partner Meeting Prep',
+    icmemo: 'IC Memo Generator',
+    fundradar: 'Fundraising Radar',
+    vccrm: 'Relationship Intelligence',
+    networkmap: 'Co-Investment Network',
+    competitive: 'Competitive Landscape',
+    lpreport: 'LP Quarterly Report',
+    dealvelocity: 'Deal Velocity Tracker',
+    admin: 'Admin Panel',
+    activitylog: 'Activity Log'
   };
   document.getElementById('page-title').textContent = titles[section] || '';
 
@@ -397,6 +412,16 @@ function renderCurrentSection() {
     case 'patterns': renderPatterns(area); break;
     case 'briefing': renderBriefing(area); break;
     case 'integrations': renderIntegrations(area); break;
+    case 'meetingprep': renderMeetingPrep(area); break;
+    case 'icmemo': renderICMemo(area); break;
+    case 'fundradar': renderFundRadar(area); break;
+    case 'vccrm': renderVCCRM(area); break;
+    case 'networkmap': renderNetworkMap(area); break;
+    case 'competitive': renderCompetitive(area); break;
+    case 'lpreport': renderLPReport(area); break;
+    case 'dealvelocity': renderDealVelocity(area); break;
+    case 'admin': renderAdmin(area); break;
+    case 'activitylog': renderActivityLog(area); break;
   }
 }
 
@@ -406,7 +431,7 @@ function renderCurrentSection() {
 function getFilteredStartups() {
   return rankedStartups.filter(s => {
     if (filters.geo !== 'All' && s.geography !== filters.geo) return false;
-    if (filters.sector !== 'All' && s.sector !== filters.sector) return false;
+    if (filters.sector !== 'All' && s.sector !== filters.sector && s.subSector !== filters.sector) return false;
     if (filters.tier !== 'All' && s.scores.tier.class !== filters.tier) return false;
     if (filters.search) {
       const q = filters.search;
@@ -698,7 +723,10 @@ function renderDeckAnalyzer(area) {
   // Bind upload
   const uploadZone = document.getElementById('deck-upload-zone');
   const fileInput = document.getElementById('deck-file-input');
+  const browseBtn = uploadZone.querySelector('.upload-btn');
 
+  browseBtn.addEventListener('click', (e) => { e.stopPropagation(); fileInput.click(); });
+  uploadZone.addEventListener('click', () => fileInput.click());
   uploadZone.addEventListener('dragover', (e) => { e.preventDefault(); uploadZone.classList.add('dragover'); });
   uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
   uploadZone.addEventListener('drop', (e) => {
@@ -1457,11 +1485,893 @@ function renderIntegrations(area) {
   });
 }
 
+// ============================================================
+// PHASE 3: NEW INTELLIGENCE MODULES
+// ============================================================
+
+// ---- Meeting Prep Data ----
+const IC_OBJECTIONS = {
+  'Consumer Tech': [
+    { objection: 'Unit economics don\'t work at scale in India', counter: 'CAC:LTV ratio is 1:4.2, improving 15% QoQ. Blended margin turns positive at 50K orders/day — currently at 32K.' },
+    { objection: 'Crowded space with well-funded incumbents', counter: 'Incumbents focus on Tier-1. This targets Tier-2/3 where top 3 players have <8% penetration combined.' },
+    { objection: 'Founders haven\'t built at this scale before', counter: 'CTO scaled infra at Flipkart from 10K→500K orders/day. CEO has domain expertise + strong operator DNA.' },
+    { objection: 'Regulatory uncertainty in financial services', counter: 'RBI sandbox approval received. Licensed NBFC partner handles compliance. Similar model approved in 3 other markets.' },
+    { objection: 'Path to profitability unclear', counter: 'Core commerce profitable. Losses from new city expansion. Each cohort reaches CM2 positive in month 4.' }
+  ],
+  'B2B Manufacturing': [
+    { objection: 'Long sales cycles will burn cash', counter: 'Average pilot-to-contract is 6 weeks (vs. industry 4-6 months). Land-and-expand model: avg client grows 3.2x in year 1.' },
+    { objection: 'Hardware dependency creates margin pressure', counter: 'Hardware is entry point only (15% of revenue). 85% comes from SaaS subscriptions with 78% gross margins.' },
+    { objection: 'Small TAM in Southeast Asia', counter: 'ASEAN manufacturing output is $780B. Even 0.1% SaaS penetration = $780M addressable market.' },
+    { objection: 'Difficult to build moat in enterprise software', counter: 'Proprietary ML models trained on 140M+ inspection images. Data moat deepens with each client — competitors start from zero.' },
+    { objection: 'Team lacks manufacturing domain expertise', counter: 'CEO ran $500M manufacturing operations at Shell. Advisory board includes 3 ex-factory owners with 80+ years combined.' }
+  ]
+};
+
+const TALKING_POINTS_TEMPLATES = [
+  { label: 'Market Timing', template: (s) => `${s.name} is entering the ${s.subSector} market at an inflection point — ${s.geography} \$${s.tam}${s.tamUnit} TAM with only ${s.stage}-stage competition.` },
+  { label: 'Founder Signal', template: (s) => `${s.founders[0].name} (${s.founders[0].pedigree.split(',')[0]}) brings rare combination of domain + execution. ${s.founders.length > 1 ? s.founders[1].name + ' complements on tech side.' : ''}` },
+  { label: 'Traction Quality', template: (s) => `${s.metrics.mauGrowth}% MoM growth to ${s.metrics.mau > 1000 ? (s.metrics.mau / 1000).toFixed(0) + 'K' : s.metrics.mau} MAU. Revenue at \$${s.metrics.revenue > 1000 ? (s.metrics.revenue / 1000).toFixed(0) + 'K' : s.metrics.revenue}/mo growing ${s.metrics.revenueGrowth}% MoM.` },
+  { label: 'Capital Efficiency', template: (s) => `Burning \$${(s.metrics.burnRate / 1000).toFixed(0)}K/mo with ${s.metrics.runway}mo runway. Last round: \$${s.lastRound.amount}M ${s.lastRound.type} — valuation implies ${(s.lastRound.amount / (s.metrics.revenue * 12 / 1000000) || 0).toFixed(0)}x revenue multiple.` },
+  { label: 'Competitive Edge', template: (s) => `Key differentiation in ${s.subSector}: ${s.signals.founderExit.detail}. Hiring signal: ${s.signals.hiringSpike.detail}.` },
+  { label: 'IC Ask', template: (s) => `Recommendation: ${s.scores ? (s.scores.composite > 75 ? 'Strong conviction — proceed to term sheet.' : s.scores.composite > 60 ? 'Positive lean — schedule deep dive with founders.' : 'Monitor — revisit in 3 months.') : 'Evaluate scoring data.'}` }
+];
+
+function renderMeetingPrep(area) {
+  const startups = rankedStartups.length ? rankedStartups : [];
+  let selectedStartup = startups[0];
+
+  function buildPrep(s) {
+    if (!s) return '<div class="empty-state">No startups available for prep</div>';
+    const sectorObjns = IC_OBJECTIONS[s.sector] || IC_OBJECTIONS['Consumer Tech'];
+    const talkingPts = TALKING_POINTS_TEMPLATES.map(t => ({ label: t.label, text: t.template(s) }));
+    const risks = [
+      { risk: 'Market timing too early', prob: s.tam > 20 ? 'Low' : 'Medium', impact: 'High' },
+      { risk: 'Execution at scale', prob: s.metrics.mauGrowth > 100 ? 'Low' : 'Medium', impact: 'High' },
+      { risk: 'Competitive response', prob: s.signals.hiringSpike.score > 70 ? 'Medium' : 'Low', impact: 'Medium' },
+      { risk: 'Regulatory headwinds', prob: s.sector === 'Consumer Tech' ? 'Medium' : 'Low', impact: 'High' },
+      { risk: 'Key person dependency', prob: s.founders.length < 2 ? 'High' : 'Low', impact: 'High' },
+      { risk: 'Capital markets downturn', prob: 'Medium', impact: 'Medium' }
+    ];
+
+    return `
+      <div class="prep-snapshot">
+        <div class="deal-card" style="margin-bottom:0">
+          <div class="deal-card-header">
+            <div class="deal-logo">${s.logo}</div>
+            <div class="deal-info">
+              <h3 class="deal-name">${s.name}</h3>
+              <span class="deal-meta">${s.subSector} · ${s.geography} · ${s.stage}</span>
+            </div>
+            <div class="deal-score ${getScoreClass(s.scores.composite)}">${s.scores.composite}</div>
+          </div>
+          <p style="color:var(--text-secondary);font-size:0.82rem;margin:12px 0">${s.description}</p>
+          <div class="stats-row" style="margin-top:8px">
+            <div class="stat-item"><div class="stat-value" style="color:var(--accent-green)">${s.metrics.mau > 1000 ? (s.metrics.mau / 1000).toFixed(0) + 'K' : s.metrics.mau}</div><div class="stat-label">MAU</div></div>
+            <div class="stat-item"><div class="stat-value" style="color:var(--accent-blue)">$${s.metrics.revenue > 1000 ? (s.metrics.revenue / 1000).toFixed(0) + 'K' : s.metrics.revenue}</div><div class="stat-label">MRR</div></div>
+            <div class="stat-item"><div class="stat-value" style="color:var(--accent-purple)">$${s.lastRound.amount}M</div><div class="stat-label">${s.lastRound.type}</div></div>
+            <div class="stat-item"><div class="stat-value" style="color:var(--accent-orange)">${s.metrics.runway}mo</div><div class="stat-label">Runway</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="phase3-grid">
+        <div class="phase3-panel">
+          <h3 class="phase3-panel-title">🗣️ Talking Points</h3>
+          <div class="talking-points-list">
+            ${talkingPts.map(tp => `
+              <div class="talking-point">
+                <div class="tp-label">${tp.label}</div>
+                <div class="tp-text">${tp.text}</div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+
+        <div class="phase3-panel">
+          <h3 class="phase3-panel-title">⚔️ IC Objection Playbook</h3>
+          <div class="objections-list">
+            ${sectorObjns.map((o, i) => `
+              <div class="objection-item">
+                <div class="objection-q">❓ "${o.objection}"</div>
+                <div class="objection-a">💡 ${o.counter}</div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+
+      <div class="phase3-panel" style="margin-top:16px">
+        <h3 class="phase3-panel-title">⚠️ Risk Matrix</h3>
+        <div class="risk-matrix-grid">
+          ${risks.map(r => `
+            <div class="risk-item risk-${r.prob.toLowerCase()}-${r.impact.toLowerCase()}">
+              <div class="risk-name">${r.risk}</div>
+              <div class="risk-tags">
+                <span class="risk-tag prob-${r.prob.toLowerCase()}">P: ${r.prob}</span>
+                <span class="risk-tag impact-${r.impact.toLowerCase()}">I: ${r.impact}</span>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  area.innerHTML = `
+    <div class="prep-selector">
+      <label class="prep-label">Select Company for IC Prep</label>
+      <select class="filter-select prep-select" id="prep-company-select">
+        ${startups.map((s, i) => `<option value="${i}">${s.logo} ${s.name} — ${s.subSector} (Score: ${s.scores.composite})</option>`).join('')}
+      </select>
+    </div>
+    <div id="prep-output">${buildPrep(selectedStartup)}</div>
+  `;
+
+  document.getElementById('prep-company-select')?.addEventListener('change', (e) => {
+    selectedStartup = startups[parseInt(e.target.value)];
+    document.getElementById('prep-output').innerHTML = buildPrep(selectedStartup);
+  });
+}
+
+// ---- IC Memo Generator ----
+function renderICMemo(area) {
+  const startups = rankedStartups.length ? rankedStartups : [];
+  let selectedStartup = startups[0];
+
+  function buildMemo(s) {
+    if (!s) return '<div class="empty-state">No startups to generate memo for</div>';
+    const score = s.scores;
+    const rec = score.composite > 75 ? 'PROCEED — Strong conviction' : score.composite > 60 ? 'LEAN POSITIVE — Deep dive recommended' : 'MONITOR — Revisit in 3 months';
+    const recClass = score.composite > 75 ? 'hot' : score.composite > 60 ? 'warm' : 'watch';
+
+    const memoHTML = `
+## INVESTMENT COMMITTEE MEMO
+
+**Company:** ${s.name}
+**Sector:** ${s.subSector} (${s.sector})
+**Geography:** ${s.city}, ${s.geography}
+**Stage:** ${s.stage} | Last Round: $${s.lastRound.amount}M ${s.lastRound.type} (${s.lastRound.date})
+**Deal Score:** ${score.composite}/100
+
+---
+
+### EXECUTIVE SUMMARY
+${s.name} is a ${s.stage}-stage ${s.subSector.toLowerCase()} company based in ${s.city}, ${s.geography}. ${s.description}
+
+Founded ${s.founded}, the company has achieved ${s.metrics.mau > 1000 ? (s.metrics.mau / 1000).toFixed(0) + 'K' : s.metrics.mau} MAU with ${s.metrics.mauGrowth}% MoM growth, generating \\$${s.metrics.revenue > 1000 ? (s.metrics.revenue / 1000).toFixed(0) + 'K' : s.metrics.revenue}/mo in revenue (growing ${s.metrics.revenueGrowth}% MoM).
+
+### TEAM
+${s.founders.map(f => `- **${f.name}** (${f.role}) — ${f.pedigree}`).join('\n')}
+
+### MARKET OPPORTUNITY
+- **TAM:** $${s.tam}${s.tamUnit}
+- **Sector Dynamics:** ${s.signals.viralTraction.detail}
+- **Competitive Position:** ${s.signals.founderExit.detail}
+
+### TRACTION & METRICS
+| Metric | Value | Trend |
+|--------|-------|-------|
+| MAU | ${s.metrics.mau > 1000 ? (s.metrics.mau / 1000).toFixed(0) + 'K' : s.metrics.mau} | +${s.metrics.mauGrowth}% MoM |
+| Revenue | $${s.metrics.revenue > 1000 ? (s.metrics.revenue / 1000).toFixed(0) + 'K' : s.metrics.revenue}/mo | +${s.metrics.revenueGrowth}% MoM |
+| Burn Rate | $${(s.metrics.burnRate / 1000).toFixed(0)}K/mo | — |
+| Runway | ${s.metrics.runway} months | — |
+
+### SIGNALS
+- 👥 **Hiring:** ${s.signals.hiringSpike.detail} (${s.signals.hiringSpike.score}/100)
+- 📈 **Traction:** ${s.signals.viralTraction.detail} (${s.signals.viralTraction.score}/100)
+- 📲 **Downloads:** ${s.signals.appDownloads.detail} (${s.signals.appDownloads.score}/100)
+- 💰 **Funding:** ${s.signals.angelFunding.detail} (${s.signals.angelFunding.score}/100)
+
+### SCORING BREAKDOWN
+- Market (${score.market}/100) | Founder (${score.founder}/100) | Traction (${score.traction}/100)
+- Product (${score.product}/100) | Timing (${score.timing}/100)
+- **Composite: ${score.composite}/100**
+
+### RECOMMENDATION
+**${rec}**
+
+---
+*Generated by Jungle Ventures Intelligence Platform — ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}*`;
+
+    return `
+      <div class="memo-container">
+        <div class="memo-actions">
+          <div class="tier-badge tier-${recClass}" style="font-size:0.85rem;padding:6px 16px">${rec}</div>
+          <div style="display:flex;gap:8px">
+            <button class="integration-connect-btn" id="memo-copy-btn">📋 Copy Memo</button>
+            <button class="integration-connect-btn" id="memo-download-btn" style="background:var(--accent-purple)">⬇️ Download .md</button>
+          </div>
+        </div>
+        <div class="memo-body">
+          <pre class="memo-content">${memoHTML}</pre>
+        </div>
+        <div class="memo-radar" id="memo-radar-chart">
+          ${createRadarChart(score, 200)}
+        </div>
+      </div>
+    `;
+  }
+
+  area.innerHTML = `
+    <div class="prep-selector">
+      <label class="prep-label">Generate IC Memo For</label>
+      <select class="filter-select prep-select" id="memo-company-select">
+        ${startups.map((s, i) => `<option value="${i}">${s.logo} ${s.name} — Score: ${s.scores.composite}</option>`).join('')}
+      </select>
+    </div>
+    <div id="memo-output">${buildMemo(selectedStartup)}</div>
+  `;
+
+  function attachMemoListeners() {
+    const rawMemo = document.querySelector('.memo-content')?.textContent || '';
+    document.getElementById('memo-copy-btn')?.addEventListener('click', () => {
+      navigator.clipboard.writeText(rawMemo).then(() => {
+        const btn = document.getElementById('memo-copy-btn');
+        btn.textContent = '✅ Copied!';
+        setTimeout(() => btn.textContent = '📋 Copy Memo', 2000);
+      });
+    });
+    document.getElementById('memo-download-btn')?.addEventListener('click', () => {
+      const blob = new Blob([rawMemo], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `IC-Memo-${selectedStartup.name.replace(/\s+/g, '-')}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+  }
+  attachMemoListeners();
+
+  document.getElementById('memo-company-select')?.addEventListener('change', (e) => {
+    selectedStartup = startups[parseInt(e.target.value)];
+    document.getElementById('memo-output').innerHTML = buildMemo(selectedStartup);
+    attachMemoListeners();
+  });
+}
+
+// ---- Fundraising Radar Data ----
+const FUNDRAISING_SIGNALS = [
+  { company: 'QuickDeliver', signal: 'Hired VP Finance + 3 FP&A roles — typical pre-raise signal', confidence: 'High', estStage: 'Series A', estSize: '$8-12M', date: '2 days ago', icon: '👥' },
+  { company: 'FactoryOS', signal: 'CEO spoke at YC Demo Day networking event', confidence: 'High', estStage: 'Series A', estSize: '$10-15M', date: '3 days ago', icon: '🎤' },
+  { company: 'PlaySEA', signal: 'Office expansion from 2K to 8K sqft in Singapore', confidence: 'Medium', estStage: 'Series A', estSize: '$6-10M', date: '5 days ago', icon: '🏢' },
+  { company: 'ChainFlow', signal: 'New "Investor Relations" page added to website', confidence: 'Medium', estStage: 'Series A', estSize: '$5-8M', date: '1 week ago', icon: '🌐' },
+  { company: 'EyeQuality', signal: 'Board meeting cadence increased to bi-weekly', confidence: 'Medium', estStage: 'Series B', estSize: '$20-30M', date: '1 week ago', icon: '📅' },
+  { company: 'LendAPI', signal: 'Bloomberg interview discussing "next phase of growth"', confidence: 'Medium', estStage: 'Series A', estSize: '$8-12M', date: '10 days ago', icon: '📰' },
+  { company: 'TokTok Bharat', signal: 'Hired Goldman Sachs associate as Chief of Staff', confidence: 'High', estStage: 'Series A', estSize: '$15-20M', date: '12 days ago', icon: '👔' },
+  { company: 'RoboAssembly', signal: 'Patent filings accelerated — 4 new patents in 2 months', confidence: 'Low', estStage: 'Series A', estSize: '$5-8M', date: '2 weeks ago', icon: '📜' },
+  { company: 'GreenMill', signal: 'Partnership announcement with Temasek-linked accelerator', confidence: 'Medium', estStage: 'Series A', estSize: '$8-12M', date: '2 weeks ago', icon: '🤝' },
+  { company: 'SaveStack', signal: 'Multiple Glassdoor reviews mention "exciting fundraise"', confidence: 'Low', estStage: 'Seed+', estSize: '$3-5M', date: '3 weeks ago', icon: '💬' }
+];
+
+function renderFundRadar(area) {
+  const confColors = { High: 'var(--accent-green)', Medium: 'var(--accent-orange)', Low: 'var(--text-muted)' };
+  const confBg = { High: 'rgba(16,185,129,0.1)', Medium: 'rgba(245,158,11,0.1)', Low: 'rgba(148,163,184,0.1)' };
+
+  const geoHeat = {};
+  rankedStartups.forEach(s => { geoHeat[s.geography] = (geoHeat[s.geography] || 0) + 1; });
+
+  area.innerHTML = `
+    <div class="radar-stats-row">
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-green)">${FUNDRAISING_SIGNALS.filter(s => s.confidence === 'High').length}</div><div class="stat-card-label">🔥 High Confidence</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-orange)">${FUNDRAISING_SIGNALS.filter(s => s.confidence === 'Medium').length}</div><div class="stat-card-label">⚡ Medium Confidence</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--text-muted)">${FUNDRAISING_SIGNALS.filter(s => s.confidence === 'Low').length}</div><div class="stat-card-label">👀 Watching</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-purple)">${FUNDRAISING_SIGNALS.length}</div><div class="stat-card-label">📡 Total Signals</div></div>
+    </div>
+
+    <div class="phase3-grid">
+      <div class="phase3-panel" style="flex:2">
+        <h3 class="phase3-panel-title">📡 Signal Feed</h3>
+        <div class="signal-feed">
+          ${FUNDRAISING_SIGNALS.map(sig => `
+            <div class="signal-item" style="border-left:3px solid ${confColors[sig.confidence]}">
+              <div class="signal-header">
+                <span class="signal-icon">${sig.icon}</span>
+                <strong class="signal-company">${sig.company}</strong>
+                <span class="signal-date">${sig.date}</span>
+              </div>
+              <div class="signal-body">${sig.signal}</div>
+              <div class="signal-footer">
+                <span class="signal-tag" style="background:${confBg[sig.confidence]};color:${confColors[sig.confidence]}">${sig.confidence} Confidence</span>
+                <span class="signal-tag" style="background:rgba(99,102,241,0.1);color:var(--accent-indigo)">${sig.estStage}</span>
+                <span class="signal-tag" style="background:rgba(236,72,153,0.1);color:var(--accent-pink)">${sig.estSize}</span>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      <div class="phase3-panel" style="flex:1">
+        <h3 class="phase3-panel-title">🗺️ Geographic Activity</h3>
+        <div class="geo-heat-list">
+          ${Object.entries(geoHeat).sort((a, b) => b[1] - a[1]).map(([geo, count]) => `
+            <div class="geo-heat-item">
+              <span class="geo-name">${geo}</span>
+              <div class="geo-bar-wrap">
+                <div class="geo-bar" style="width:${(count / Math.max(...Object.values(geoHeat))) * 100}%"></div>
+              </div>
+              <span class="geo-count">${count} deals</span>
+            </div>
+          `).join('')}
+        </div>
+
+        <h3 class="phase3-panel-title" style="margin-top:24px">📊 Stage Distribution</h3>
+        <div class="geo-heat-list">
+          ${['Seed', 'Pre-Seed', 'Series A'].map(stage => {
+    const count = FUNDRAISING_SIGNALS.filter(s => s.estStage.includes(stage) || s.estStage === stage).length;
+    return `<div class="geo-heat-item">
+              <span class="geo-name">${stage}</span>
+              <div class="geo-bar-wrap"><div class="geo-bar" style="width:${(count / FUNDRAISING_SIGNALS.length) * 100}%;background:var(--accent-purple)"></div></div>
+              <span class="geo-count">${count}</span>
+            </div>`;
+  }).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// ---- VC CRM Data ----
+const FOUNDER_RELATIONSHIPS = [
+  { name: 'Vikram Patel', company: 'QuickDeliver', role: 'CEO', strength: 5, lastContact: '2 days ago', nextFollowUp: 'Tomorrow', interactions: 12, warmIntro: 'Direct — met at YC Demo Day', notes: 'Very responsive. Prefers WhatsApp. Wife is co-founder at another portfolio co.', status: 'Active Deal' },
+  { name: 'Li Wei Chen', company: 'FactoryOS', role: 'CEO', strength: 4, lastContact: '1 week ago', nextFollowUp: 'In 3 days', interactions: 8, warmIntro: 'Via Rajesh (Sequoia)', notes: 'Technical founder, likes deep-dive conversations. Send him research papers.', status: 'Active Deal' },
+  { name: 'Sarah Tanaka', company: 'PlaySEA', role: 'CEO', strength: 3, lastContact: '2 weeks ago', nextFollowUp: 'Overdue', interactions: 5, warmIntro: 'Via Angel network — Singapore', notes: 'Ex-Grab. Wants strategic value-add, not just capital.', status: 'Pipeline' },
+  { name: 'Arjun Mehta', company: 'ChainFlow', role: 'CEO', strength: 4, lastContact: '3 days ago', nextFollowUp: 'Next week', interactions: 9, warmIntro: 'Direct — cold outreach converted', notes: 'Strong operator. Asks pointed questions. Bring data.', status: 'Active Deal' },
+  { name: 'Maria Santos', company: 'LendAPI', role: 'CEO', strength: 2, lastContact: '1 month ago', nextFollowUp: 'Overdue', interactions: 3, warmIntro: 'Via fintech conference', notes: 'Busy schedule. Best reached via LinkedIn DM.', status: 'Pipeline' },
+  { name: 'Nguyen Thi Lan', company: 'BunPho', role: 'CEO', strength: 4, lastContact: '5 days ago', nextFollowUp: 'In 5 days', interactions: 7, warmIntro: 'Via JV portfolio founder (Kim)', notes: 'Passionate about Vietnamese food tech. Good culture fit.', status: 'Active Deal' },
+  { name: 'Ravi Kumar', company: 'EyeQuality', role: 'CTO', strength: 3, lastContact: '10 days ago', nextFollowUp: 'In 2 days', interactions: 6, warmIntro: 'Via IIT Delhi alumni network', notes: 'Deep tech background. Wants to discuss AI architecture.', status: 'Pipeline' },
+  { name: 'Chen Wei', company: 'GreenMill', role: 'CEO', strength: 3, lastContact: '2 weeks ago', nextFollowUp: 'This week', interactions: 4, warmIntro: 'Via Temasek sustainability circle', notes: 'ESG expert. Connected to Shell APAC network.', status: 'Watching' }
+];
+
+function renderVCCRM(area) {
+  const overdue = FOUNDER_RELATIONSHIPS.filter(f => f.nextFollowUp === 'Overdue' || f.nextFollowUp === 'Tomorrow');
+  const statusColors = { 'Active Deal': 'var(--accent-green)', 'Pipeline': 'var(--accent-blue)', 'Watching': 'var(--accent-orange)' };
+
+  area.innerHTML = `
+    <div class="radar-stats-row">
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-green)">${FOUNDER_RELATIONSHIPS.filter(f => f.status === 'Active Deal').length}</div><div class="stat-card-label">Active Deals</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-blue)">${FOUNDER_RELATIONSHIPS.filter(f => f.status === 'Pipeline').length}</div><div class="stat-card-label">In Pipeline</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-red)">${overdue.length}</div><div class="stat-card-label">⚠️ Needs Attention</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-purple)">${FOUNDER_RELATIONSHIPS.reduce((a, f) => a + f.interactions, 0)}</div><div class="stat-card-label">Total Interactions</div></div>
+    </div>
+
+    <div class="phase3-grid">
+      <div class="phase3-panel" style="flex:2">
+        <h3 class="phase3-panel-title">👥 Founder Relationships</h3>
+        <div class="crm-list">
+          ${FOUNDER_RELATIONSHIPS.map(f => `
+            <div class="crm-card${f.nextFollowUp === 'Overdue' ? ' crm-overdue' : ''}">
+              <div class="crm-card-header">
+                <div>
+                  <strong class="crm-name">${f.name}</strong>
+                  <span class="crm-role">${f.role} @ ${f.company}</span>
+                </div>
+                <div class="crm-strength">${'★'.repeat(f.strength)}${'☆'.repeat(5 - f.strength)}</div>
+              </div>
+              <div class="crm-card-body">
+                <div class="crm-meta-row">
+                  <span class="signal-tag" style="background:${statusColors[f.status]}22;color:${statusColors[f.status]}">${f.status}</span>
+                  <span class="crm-meta">📅 Last: ${f.lastContact}</span>
+                  <span class="crm-meta">${f.nextFollowUp === 'Overdue' ? '🔴' : '📌'} Next: ${f.nextFollowUp}</span>
+                  <span class="crm-meta">💬 ${f.interactions} interactions</span>
+                </div>
+                <div class="crm-notes">🔗 <strong>Intro:</strong> ${f.warmIntro}</div>
+                <div class="crm-notes">📝 ${f.notes}</div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      <div class="phase3-panel" style="flex:1">
+        <h3 class="phase3-panel-title">🔔 Follow-Up Queue</h3>
+        <div class="followup-queue">
+          ${FOUNDER_RELATIONSHIPS.filter(f => f.nextFollowUp === 'Overdue' || f.nextFollowUp === 'Tomorrow' || f.nextFollowUp.includes('2 days') || f.nextFollowUp.includes('3 days')).sort((a, b) => {
+    const pri = { 'Overdue': 0, 'Tomorrow': 1 };
+    return (pri[a.nextFollowUp] ?? 2) - (pri[b.nextFollowUp] ?? 2);
+  }).map(f => `
+            <div class="followup-item${f.nextFollowUp === 'Overdue' ? ' followup-urgent' : ''}">
+              <div class="followup-name">${f.name}</div>
+              <div class="followup-company">${f.company}</div>
+              <div class="followup-when">${f.nextFollowUp === 'Overdue' ? '🔴 OVERDUE' : '📅 ' + f.nextFollowUp}</div>
+            </div>
+          `).join('')}
+        </div>
+
+        <h3 class="phase3-panel-title" style="margin-top:24px">🌐 Intro Network</h3>
+        <div class="intro-network">
+          ${[...new Set(FOUNDER_RELATIONSHIPS.map(f => {
+    const via = f.warmIntro.match(/Via (.+?)(?:\s*[—–-]|$)/i);
+    return via ? via[1].trim() : 'Direct';
+  }))].map(source => {
+    const count = FOUNDER_RELATIONSHIPS.filter(f => f.warmIntro.includes(source)).length;
+    return `<div class="intro-source"><span class="intro-name">${source}</span><span class="intro-count">${count} intro${count > 1 ? 's' : ''}</span></div>`;
+  }).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// ---- Network Map Data ----
+const CO_INVESTORS = [
+  { name: 'Sequoia Capital India', deals: 5, sharedDeals: ['QuickDeliver', 'TokTok Bharat', 'PlaySEA'], color: '#6366f1' },
+  { name: 'Accel Partners', deals: 4, sharedDeals: ['ChainFlow', 'FactoryOS', 'LendAPI'], color: '#f59e0b' },
+  { name: 'Lightspeed India', deals: 3, sharedDeals: ['QuickDeliver', 'SaveStack', 'EyeQuality'], color: '#ec4899' },
+  { name: 'Tiger Global', deals: 3, sharedDeals: ['BunPho', 'PlaySEA', 'TokTok Bharat'], color: '#10b981' },
+  { name: 'Wavemaker Partners', deals: 2, sharedDeals: ['GreenMill', 'RoboAssembly'], color: '#8b5cf6' },
+  { name: 'East Ventures', deals: 2, sharedDeals: ['MateriLink', 'ChainFlow'], color: '#f97316' },
+  { name: 'GFC (Global Founders)', deals: 2, sharedDeals: ['PackBot', 'FactoryOS'], color: '#14b8a6' },
+  { name: '500 Global', deals: 1, sharedDeals: ['LendAPI'], color: '#64748b' }
+];
+
+function renderNetworkMap(area) {
+  // Build SVG network visualization
+  const centerX = 400, centerY = 280, radius = 200;
+  const nodes = CO_INVESTORS.map((inv, i) => {
+    const angle = (i / CO_INVESTORS.length) * Math.PI * 2 - Math.PI / 2;
+    return { ...inv, x: centerX + Math.cos(angle) * radius, y: centerY + Math.sin(angle) * radius };
+  });
+
+  const svgLines = nodes.map(n => `<line x1="${centerX}" y1="${centerY}" x2="${n.x}" y2="${n.y}" stroke="${n.color}" stroke-width="${n.deals * 0.8}" opacity="0.4"/>`).join('');
+  const svgNodes = nodes.map(n => `
+    <circle cx="${n.x}" cy="${n.y}" r="${12 + n.deals * 3}" fill="${n.color}" opacity="0.8"/>
+    <text x="${n.x}" y="${n.y + 30 + n.deals * 3}" text-anchor="middle" fill="var(--text-secondary)" font-size="11" font-family="Inter">${n.name.split(' ').slice(0, 2).join(' ')}</text>
+    <text x="${n.x}" y="${n.y + 44 + n.deals * 3}" text-anchor="middle" fill="var(--text-muted)" font-size="9" font-family="Inter">${n.deals} co-deals</text>
+  `).join('');
+
+  area.innerHTML = `
+    <div class="phase3-grid">
+      <div class="phase3-panel" style="flex:2">
+        <h3 class="phase3-panel-title">🕸️ Co-Investment Network</h3>
+        <div class="network-svg-wrap">
+          <svg viewBox="0 0 800 560" class="network-svg">
+            ${svgLines}
+            <circle cx="${centerX}" cy="${centerY}" r="28" fill="var(--accent-green)" opacity="0.9"/>
+            <text x="${centerX}" y="${centerY - 4}" text-anchor="middle" fill="white" font-size="10" font-weight="700" font-family="Inter">Jungle</text>
+            <text x="${centerX}" y="${centerY + 10}" text-anchor="middle" fill="white" font-size="10" font-weight="700" font-family="Inter">Ventures</text>
+            ${svgNodes}
+          </svg>
+        </div>
+      </div>
+
+      <div class="phase3-panel" style="flex:1">
+        <h3 class="phase3-panel-title">🏆 Top Co-Investors</h3>
+        <div class="coinvestor-list">
+          ${CO_INVESTORS.sort((a, b) => b.deals - a.deals).map((inv, i) => `
+            <div class="coinvestor-item">
+              <div class="coinvestor-rank">#${i + 1}</div>
+              <div class="coinvestor-info">
+                <div class="coinvestor-name">${inv.name}</div>
+                <div class="coinvestor-deals">${inv.sharedDeals.join(', ')}</div>
+              </div>
+              <div class="coinvestor-count" style="color:${inv.color}">${inv.deals}</div>
+            </div>
+          `).join('')}
+        </div>
+
+        <h3 class="phase3-panel-title" style="margin-top:24px">💡 Syndicate Suggestions</h3>
+        <div class="syndicate-list">
+          ${rankedStartups.slice(0, 4).map(s => {
+    const suggested = CO_INVESTORS.filter(inv => inv.sharedDeals.some(d => rankedStartups.find(rs => rs.name === d)?.sector === s.sector)).slice(0, 2);
+    return `<div class="syndicate-item">
+              <span class="syndicate-deal">${s.logo} ${s.name}</span>
+              <span class="syndicate-partners">${suggested.map(inv => inv.name.split(' ')[0]).join(', ') || 'New partner needed'}</span>
+            </div>`;
+  }).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// ============================================================
+// PHASE 4: ADVANCED ANALYTICS
+// ============================================================
+
+// ---- Competitive Landscape ----
+const COMPETITORS = [
+  { name: 'Sequoia India', aum: '$9.5B', focus: 'Series A-C', deals2025: 42, avgCheck: '$15M', strengths: ['Brand', 'Network', 'Follow-on'], weaknesses: ['Slow DD', 'Board heavy'], overlap: 6, color: '#6366f1' },
+  { name: 'Accel India', aum: '$3.2B', focus: 'Seed-Series B', deals2025: 38, avgCheck: '$8M', strengths: ['Speed', 'Founder-first', 'Platform'], weaknesses: ['Small fund', 'Less ASEAN'], overlap: 4, color: '#f59e0b' },
+  { name: 'Lightspeed', aum: '$7.1B', focus: 'Series A-B', deals2025: 31, avgCheck: '$12M', strengths: ['Global reach', 'Data-driven'], weaknesses: ['Less local', 'High bar'], overlap: 3, color: '#ec4899' },
+  { name: 'Tiger Global', aum: '$12.7B', focus: 'Growth', deals2025: 25, avgCheck: '$25M', strengths: ['Speed', 'Large checks', 'No board'], weaknesses: ['Less hands-on', 'Pullback risk'], overlap: 3, color: '#10b981' },
+  { name: 'East Ventures', aum: '$0.9B', focus: 'Pre-Seed/Seed', deals2025: 55, avgCheck: '$1.5M', strengths: ['Indonesia deep', 'Speed', 'Community'], weaknesses: ['Small checks', 'Limited follow-on'], overlap: 2, color: '#f97316' },
+  { name: 'Wavemaker', aum: '$0.6B', focus: 'Seed-Series A', deals2025: 28, avgCheck: '$3M', strengths: ['ASEAN native', 'Operator network'], weaknesses: ['Fund size', 'Brand awareness'], overlap: 2, color: '#8b5cf6' }
+];
+
+function renderCompetitive(area) {
+  const jv = { name: 'Jungle Ventures', aum: '$1.5B', focus: 'Seed-Series B', deals2025: 16, avgCheck: '$5M', color: 'var(--accent-green)' };
+
+  area.innerHTML = `
+    <div class="radar-stats-row">
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-green)">${COMPETITORS.length}</div><div class="stat-card-label">Tracked Competitors</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-blue)">${COMPETITORS.reduce((a, c) => a + c.overlap, 0)}</div><div class="stat-card-label">Deal Overlaps</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-purple)">${COMPETITORS.reduce((a, c) => a + c.deals2025, 0)}</div><div class="stat-card-label">Total Market Deals</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-orange)">$${(COMPETITORS.reduce((a, c) => a + parseFloat(c.aum.replace('$', '')), 0)).toFixed(1)}B</div><div class="stat-card-label">Combined AUM</div></div>
+    </div>
+
+    <div class="phase3-grid">
+      <div class="phase3-panel" style="flex:2">
+        <h3 class="phase3-panel-title">🏟️ Competitive Positioning</h3>
+        <div class="comp-table-wrap">
+          <table class="comp-table">
+            <thead><tr><th>Fund</th><th>AUM</th><th>Focus</th><th>Deals '25</th><th>Avg Check</th><th>Overlap</th><th>Strengths</th></tr></thead>
+            <tbody>
+              <tr class="comp-row-jv"><td><strong>🌴 ${jv.name}</strong></td><td>${jv.aum}</td><td>${jv.focus}</td><td>${jv.deals2025}</td><td>${jv.avgCheck}</td><td>—</td><td>ASEAN focus, Speed, LP network</td></tr>
+              ${COMPETITORS.map(c => `<tr>
+                <td><span style="color:${c.color}">●</span> ${c.name}</td><td>${c.aum}</td><td>${c.focus}</td><td>${c.deals2025}</td><td>${c.avgCheck}</td>
+                <td><span class="comp-overlap">${c.overlap}</span></td>
+                <td>${c.strengths.slice(0, 2).join(', ')}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="phase3-panel" style="flex:1">
+        <h3 class="phase3-panel-title">⚔️ SWOT — Jungle Ventures</h3>
+        <div class="swot-grid">
+          <div class="swot-box swot-s"><div class="swot-label">Strengths</div><ul><li>Deep ASEAN network</li><li>Speed to term sheet</li><li>Founder-friendly terms</li><li>LP co-invest program</li></ul></div>
+          <div class="swot-box swot-w"><div class="swot-label">Weaknesses</div><ul><li>Smaller fund vs peers</li><li>Limited US presence</li><li>Brand awareness in India</li><li>Follow-on capacity</li></ul></div>
+          <div class="swot-box swot-o"><div class="swot-label">Opportunities</div><ul><li>Vietnam/Philippines growth</li><li>B2B Manufacturing boom</li><li>ESG/Climate tech wave</li><li>Web3 infrastructure</li></ul></div>
+          <div class="swot-box swot-t"><div class="swot-label">Threats</div><ul><li>Tiger/Coatue return</li><li>Local fund scaling</li><li>LP allocation shifts</li><li>Macro downturn</li></ul></div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// ---- LP Report Generator ----
+function renderLPReport(area) {
+  const quarter = 'Q4 2025';
+  const portfolio = rankedStartups.length ? rankedStartups : [];
+  const totalDeployed = portfolio.reduce((a, s) => a + (s.lastRound.amount || 0), 0);
+  const avgScore = portfolio.length ? Math.round(portfolio.reduce((a, s) => a + s.scores.composite, 0) / portfolio.length) : 0;
+  const topPerformer = portfolio[0];
+
+  const reportMD = `# JUNGLE VENTURES — LP QUARTERLY REPORT
+## ${quarter}
+
+### PORTFOLIO OVERVIEW
+- **Total Companies:** ${portfolio.length}
+- **Capital Deployed:** $${totalDeployed.toFixed(1)}M
+- **Average Deal Score:** ${avgScore}/100
+- **Geographies:** India (${portfolio.filter(s => s.geography === 'India').length}), Singapore (${portfolio.filter(s => s.geography === 'Singapore').length}), Vietnam (${portfolio.filter(s => s.geography === 'Vietnam').length}), Indonesia (${portfolio.filter(s => s.geography === 'Indonesia').length}), Philippines (${portfolio.filter(s => s.geography === 'Philippines').length})
+
+### TOP PERFORMERS
+${portfolio.slice(0, 5).map((s, i) => `${i + 1}. **${s.name}** (${s.subSector}) — Score: ${s.scores.composite}, MRR: $${s.metrics.revenue > 1000 ? (s.metrics.revenue / 1000).toFixed(0) + 'K' : s.metrics.revenue}, Growth: ${s.metrics.revenueGrowth}% MoM`).join('\n')}
+
+### SECTOR BREAKDOWN
+- Consumer Tech: ${portfolio.filter(s => s.sector === 'Consumer Tech').length} companies
+- B2B Manufacturing: ${portfolio.filter(s => s.sector === 'B2B Manufacturing').length} companies
+
+### KEY HIGHLIGHTS
+- Strongest signal: ${topPerformer ? topPerformer.name + ' leading with ' + topPerformer.scores.composite + '/100 composite score' : 'N/A'}
+- Pipeline: 16 deals tracked, 1 hot deals requiring immediate attention
+- Follow-on candidates: ${portfolio.filter(s => s.scores.composite > 65).length} companies scoring above 65
+
+---
+*Generated by Jungle Ventures Intelligence Platform — ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}*`;
+
+  area.innerHTML = `
+    <div class="radar-stats-row">
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-green)">${portfolio.length}</div><div class="stat-card-label">Portfolio Companies</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-blue)">$${totalDeployed.toFixed(1)}M</div><div class="stat-card-label">Capital Deployed</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-purple)">${avgScore}</div><div class="stat-card-label">Avg Deal Score</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-orange)">5</div><div class="stat-card-label">Geographies</div></div>
+    </div>
+
+    <div class="memo-actions">
+      <div class="tier-badge tier-hot" style="font-size:0.85rem;padding:6px 16px">📊 ${quarter} Report</div>
+      <div style="display:flex;gap:8px">
+        <button class="integration-connect-btn" id="lp-copy-btn">📋 Copy Report</button>
+        <button class="integration-connect-btn" id="lp-download-btn" style="background:var(--accent-purple)">⬇️ Download .md</button>
+      </div>
+    </div>
+
+    <div class="memo-body"><pre class="memo-content">${reportMD}</pre></div>
+
+    <div class="phase3-grid">
+      <div class="phase3-panel">
+        <h3 class="phase3-panel-title">📈 Portfolio by Geography</h3>
+        <div class="geo-heat-list">
+          ${['India', 'Singapore', 'Vietnam', 'Indonesia', 'Philippines'].map(geo => {
+    const count = portfolio.filter(s => s.geography === geo).length;
+    return `<div class="geo-heat-item"><span class="geo-name">${geo}</span><div class="geo-bar-wrap"><div class="geo-bar" style="width:${(count / Math.max(1, ...['India', 'Singapore', 'Vietnam', 'Indonesia', 'Philippines'].map(g => portfolio.filter(s => s.geography === g).length))) * 100}%"></div></div><span class="geo-count">${count}</span></div>`;
+  }).join('')}
+        </div>
+      </div>
+      <div class="phase3-panel">
+        <h3 class="phase3-panel-title">🏆 Top 5 by Score</h3>
+        <div class="coinvestor-list">
+          ${portfolio.slice(0, 5).map((s, i) => `<div class="coinvestor-item"><div class="coinvestor-rank">#${i + 1}</div><div class="coinvestor-info"><div class="coinvestor-name">${s.logo} ${s.name}</div><div class="coinvestor-deals">${s.subSector} · ${s.geography}</div></div><div class="coinvestor-count" style="color:${getScoreColor(s.scores.composite)}">${s.scores.composite}</div></div>`).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('lp-copy-btn')?.addEventListener('click', () => {
+    navigator.clipboard.writeText(reportMD).then(() => {
+      const btn = document.getElementById('lp-copy-btn');
+      btn.textContent = '✅ Copied!';
+      setTimeout(() => btn.textContent = '📋 Copy Report', 2000);
+    });
+  });
+  document.getElementById('lp-download-btn')?.addEventListener('click', () => {
+    const blob = new Blob([reportMD], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `JV-LP-Report-${quarter.replace(' ', '-')}.md`; a.click();
+    URL.revokeObjectURL(url);
+  });
+}
+
+// ---- Deal Velocity Tracker ----
+const VELOCITY_DATA = [
+  { deal: 'GreenMill', stage: 'Term Sheet', daysInPipeline: 18, daysPerStage: { sourced: 2, screening: 3, dd: 8, ic: 3, termSheet: 2 }, status: 'Fast' },
+  { deal: 'FactoryOS', stage: 'IC Review', daysInPipeline: 25, daysPerStage: { sourced: 1, screening: 5, dd: 12, ic: 7 }, status: 'Normal' },
+  { deal: 'SteelMind', stage: 'Due Diligence', daysInPipeline: 14, daysPerStage: { sourced: 2, screening: 4, dd: 8 }, status: 'Fast' },
+  { deal: 'KartBee', stage: 'Screening', daysInPipeline: 7, daysPerStage: { sourced: 3, screening: 4 }, status: 'Normal' },
+  { deal: 'QuickDeliver', stage: 'Closed', daysInPipeline: 32, daysPerStage: { sourced: 2, screening: 3, dd: 10, ic: 5, termSheet: 4, closed: 8 }, status: 'Normal' },
+  { deal: 'BunPho', stage: 'Due Diligence', daysInPipeline: 21, daysPerStage: { sourced: 1, screening: 6, dd: 14 }, status: 'Slow' },
+  { deal: 'ChainFlow', stage: 'IC Review', daysInPipeline: 19, daysPerStage: { sourced: 2, screening: 3, dd: 9, ic: 5 }, status: 'Normal' },
+  { deal: 'PlaySEA', stage: 'Screening', daysInPipeline: 5, daysPerStage: { sourced: 1, screening: 4 }, status: 'Fast' }
+];
+
+function renderDealVelocity(area) {
+  const stages = ['sourced', 'screening', 'dd', 'ic', 'termSheet', 'closed'];
+  const stageLabels = { sourced: 'Sourced', screening: 'Screening', dd: 'Due Diligence', ic: 'IC Review', termSheet: 'Term Sheet', closed: 'Closed' };
+  const avgDays = Math.round(VELOCITY_DATA.reduce((a, d) => a + d.daysInPipeline, 0) / VELOCITY_DATA.length);
+  const fastDeals = VELOCITY_DATA.filter(d => d.status === 'Fast').length;
+  const statusColors = { Fast: 'var(--accent-green)', Normal: 'var(--accent-blue)', Slow: 'var(--accent-red)' };
+
+  // Funnel
+  const funnel = stages.map(s => ({ stage: stageLabels[s], count: VELOCITY_DATA.filter(d => Object.keys(d.daysPerStage).includes(s)).length }));
+
+  area.innerHTML = `
+    <div class="radar-stats-row">
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-green)">${avgDays}d</div><div class="stat-card-label">Avg Pipeline Days</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-blue)">${fastDeals}</div><div class="stat-card-label">Fast-tracked Deals</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-purple)">${VELOCITY_DATA.filter(d => d.stage === 'Closed').length}</div><div class="stat-card-label">Closed This Quarter</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-orange)">${VELOCITY_DATA.length}</div><div class="stat-card-label">Active Pipeline</div></div>
+    </div>
+
+    <div class="phase3-grid">
+      <div class="phase3-panel" style="flex:2">
+        <h3 class="phase3-panel-title">⚡ Deal Timeline</h3>
+        <div class="velocity-list">
+          ${VELOCITY_DATA.map(d => {
+    const maxDays = 40;
+    const barWidth = (d.daysInPipeline / maxDays) * 100;
+    return `
+              <div class="velocity-item">
+                <div class="velocity-header">
+                  <strong class="velocity-deal">${d.deal}</strong>
+                  <span class="signal-tag" style="background:${statusColors[d.status]}22;color:${statusColors[d.status]}">${d.status}</span>
+                  <span class="velocity-stage">${d.stage}</span>
+                  <span class="velocity-days">${d.daysInPipeline}d</span>
+                </div>
+                <div class="velocity-bar-wrap">
+                  ${stages.filter(s => d.daysPerStage[s]).map(s => {
+      const w = (d.daysPerStage[s] / maxDays) * 100;
+      const colors = { sourced: '#64748b', screening: '#6366f1', dd: '#f59e0b', ic: '#ec4899', termSheet: '#10b981', closed: '#22c55e' };
+      return `<div class="velocity-segment" style="width:${w}%;background:${colors[s]}" title="${stageLabels[s]}: ${d.daysPerStage[s]}d"></div>`;
+    }).join('')}
+                </div>
+              </div>`;
+  }).join('')}
+        </div>
+        <div class="velocity-legend">
+          ${stages.map(s => {
+    const colors = { sourced: '#64748b', screening: '#6366f1', dd: '#f59e0b', ic: '#ec4899', termSheet: '#10b981', closed: '#22c55e' };
+    return `<span class="legend-item"><span class="legend-dot" style="background:${colors[s]}"></span>${stageLabels[s]}</span>`;
+  }).join('')}
+        </div>
+      </div>
+
+      <div class="phase3-panel" style="flex:1">
+        <h3 class="phase3-panel-title">🔻 Conversion Funnel</h3>
+        <div class="funnel-list">
+          ${funnel.map((f, i) => `
+            <div class="funnel-step">
+              <div class="funnel-bar" style="width:${(f.count / funnel[0].count) * 100}%;background:linear-gradient(90deg, var(--accent-blue), var(--accent-purple))"></div>
+              <div class="funnel-label">${f.stage}</div>
+              <div class="funnel-count">${f.count}</div>
+            </div>
+          `).join('')}
+        </div>
+
+        <h3 class="phase3-panel-title" style="margin-top:24px">📊 Stage Avg Time</h3>
+        <div class="geo-heat-list">
+          ${stages.map(s => {
+    const deals = VELOCITY_DATA.filter(d => d.daysPerStage[s]);
+    const avg = deals.length ? Math.round(deals.reduce((a, d) => a + d.daysPerStage[s], 0) / deals.length) : 0;
+    return `<div class="geo-heat-item"><span class="geo-name">${stageLabels[s]}</span><div class="geo-bar-wrap"><div class="geo-bar" style="width:${(avg / 15) * 100}%;background:var(--accent-purple)"></div></div><span class="geo-count">${avg}d</span></div>`;
+  }).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// ============================================================
+// PHASE 5: ADMIN & DATA
+// ============================================================
+
+// ---- Admin Panel ----
+const ADMIN_CREDENTIALS = [
+  { id: 'tracxn', name: 'Tracxn API', desc: 'Company data, funding rounds, and competitive intelligence', icon: '🔍', fields: ['API Key', 'API Secret'], status: 'disconnected', howTo: 'https://tracxn.com/api — Sign up for Enterprise plan → API Settings → Generate Key' },
+  { id: 'ken', name: 'Ken Newsletters', desc: 'Premium business intelligence from The Ken Asia & India', icon: '📰', fields: ['Email', 'Password'], status: 'disconnected', howTo: 'https://the-ken.com — Use your existing login credentials from your subscription' },
+  { id: 'supabase', name: 'Supabase', desc: 'Database backend for deal tracking and real-time sync', icon: '⚡', fields: ['Project URL', 'Anon Key'], status: 'disconnected', howTo: 'https://supabase.com/dashboard → Select Project → Settings → API → Copy URL & anon key' },
+  { id: 'streak', name: 'Streak CRM', desc: 'Gmail-integrated CRM for pipeline management', icon: '📧', fields: ['API Key'], status: 'disconnected', howTo: 'https://streak.com → Settings → Integrations → API → Generate API Key' },
+  { id: 'google', name: 'Google OAuth', desc: 'Gmail integration for email tracking and calendar sync', icon: '🔐', fields: ['Client ID', 'Client Secret'], status: 'disconnected', howTo: 'https://console.cloud.google.com → APIs & Services → Credentials → Create OAuth Client ID' },
+  { id: 'openai', name: 'OpenAI API', desc: 'AI-powered memo generation and deal analysis', icon: '🤖', fields: ['API Key'], status: 'disconnected', howTo: 'https://platform.openai.com/api-keys → Create new secret key' },
+  { id: 'crunchbase', name: 'Crunchbase', desc: 'Company profiles, funding data, and industry trends', icon: '💎', fields: ['API Key'], status: 'disconnected', howTo: 'https://data.crunchbase.com → Enterprise API → Generate Key from dashboard' },
+  { id: 'pitchbook', name: 'PitchBook', desc: 'Private market data, valuations, and deal comps', icon: '📈', fields: ['Username', 'Password', 'API Token'], status: 'disconnected', howTo: 'https://pitchbook.com — Contact your account manager for API access credentials' }
+];
+
+function renderAdmin(area) {
+  // Load saved creds from localStorage
+  const saved = JSON.parse(localStorage.getItem('jv_admin_creds') || '{}');
+
+  area.innerHTML = `
+    <div class="admin-notice">
+      <span>🔒</span>
+      <span>Credentials are stored locally in your browser (localStorage). They never leave your machine.</span>
+    </div>
+
+    <div class="admin-grid">
+      ${ADMIN_CREDENTIALS.map(cred => {
+    const credSaved = saved[cred.id] || {};
+    const isConnected = cred.fields.every(f => credSaved[f]);
+    return `
+          <div class="admin-card ${isConnected ? 'admin-connected' : ''}">
+            <div class="admin-card-header">
+              <span class="admin-icon">${cred.icon}</span>
+              <div>
+                <strong class="admin-name">${cred.name}</strong>
+                <span class="admin-status ${isConnected ? 'status-connected' : 'status-disconnected'}">${isConnected ? '● Connected' : '○ Not Connected'}</span>
+              </div>
+            </div>
+            <p class="admin-desc">${cred.desc}</p>
+            <p class="admin-howto">💡 <strong>How to get:</strong> ${cred.howTo}</p>
+            <div class="admin-fields" id="admin-fields-${cred.id}">
+              ${cred.fields.map(f => `
+                <div class="admin-field">
+                  <label class="admin-field-label">${f}</label>
+                  <input type="${f.toLowerCase().includes('password') || f.toLowerCase().includes('key') || f.toLowerCase().includes('secret') || f.toLowerCase().includes('token') ? 'password' : 'text'}" 
+                    class="admin-input" 
+                    id="admin-${cred.id}-${f.replace(/\s+/g, '-').toLowerCase()}"
+                    placeholder="Enter ${f}"
+                    value="${credSaved[f] || ''}" />
+                </div>
+              `).join('')}
+            </div>
+            <button class="admin-save-btn" data-cred-id="${cred.id}" data-fields='${JSON.stringify(cred.fields)}'>
+              ${isConnected ? '✅ Update' : '💾 Save & Connect'}
+            </button>
+          </div>
+        `;
+  }).join('')}
+    </div>
+  `;
+
+  // Save handlers
+  area.querySelectorAll('.admin-save-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const credId = btn.dataset.credId;
+      const fields = JSON.parse(btn.dataset.fields);
+      const vals = {};
+      let allFilled = true;
+      fields.forEach(f => {
+        const input = document.getElementById(`admin-${credId}-${f.replace(/\s+/g, '-').toLowerCase()}`);
+        vals[f] = input?.value?.trim() || '';
+        if (!vals[f]) allFilled = false;
+      });
+      if (!allFilled) { btn.textContent = '❌ Fill all fields'; setTimeout(() => btn.textContent = '💾 Save & Connect', 2000); return; }
+      const all = JSON.parse(localStorage.getItem('jv_admin_creds') || '{}');
+      all[credId] = vals;
+      localStorage.setItem('jv_admin_creds', JSON.stringify(all));
+      // Log activity
+      logActivity('credential_update', `Updated ${ADMIN_CREDENTIALS.find(c => c.id === credId)?.name} credentials`);
+      btn.textContent = '✅ Saved!';
+      btn.closest('.admin-card').classList.add('admin-connected');
+      btn.closest('.admin-card').querySelector('.admin-status').textContent = '● Connected';
+      btn.closest('.admin-card').querySelector('.admin-status').className = 'admin-status status-connected';
+      setTimeout(() => btn.textContent = '✅ Update', 2000);
+    });
+  });
+}
+
+// ---- Activity Log ----
+var ACTIVITY_LOG = JSON.parse(localStorage.getItem('jv_activity_log') || '[]');
+
+function logActivity(type, message) {
+  const entry = { type, message, time: new Date().toISOString(), id: Date.now() };
+  ACTIVITY_LOG.unshift(entry);
+  if (ACTIVITY_LOG.length > 100) ACTIVITY_LOG = ACTIVITY_LOG.slice(0, 100);
+  localStorage.setItem('jv_activity_log', JSON.stringify(ACTIVITY_LOG));
+}
+
+// Seed some demo entries if empty
+if (ACTIVITY_LOG.length === 0) {
+  const demoLogs = [
+    { type: 'deal_view', message: 'Viewed deal: GreenMill (Score: 75)', time: new Date(Date.now() - 3600000).toISOString(), id: 1 },
+    { type: 'memo_generated', message: 'Generated IC Memo for FactoryOS', time: new Date(Date.now() - 7200000).toISOString(), id: 2 },
+    { type: 'navigation', message: 'Opened Fundraising Radar', time: new Date(Date.now() - 10800000).toISOString(), id: 3 },
+    { type: 'credential_update', message: 'Updated Supabase credentials', time: new Date(Date.now() - 14400000).toISOString(), id: 4 },
+    { type: 'deal_view', message: 'Viewed deal: SteelMind (Score: 68)', time: new Date(Date.now() - 18000000).toISOString(), id: 5 },
+    { type: 'export', message: 'Downloaded LP Report Q4 2025', time: new Date(Date.now() - 21600000).toISOString(), id: 6 },
+    { type: 'navigation', message: 'Opened Network Map', time: new Date(Date.now() - 25200000).toISOString(), id: 7 },
+    { type: 'deal_view', message: 'Viewed deal: KartBee (Score: 65)', time: new Date(Date.now() - 28800000).toISOString(), id: 8 }
+  ];
+  ACTIVITY_LOG = demoLogs;
+  localStorage.setItem('jv_activity_log', JSON.stringify(ACTIVITY_LOG));
+}
+
+function renderActivityLog(area) {
+  const typeIcons = { deal_view: '👁️', memo_generated: '📋', navigation: '🧭', credential_update: '🔑', export: '⬇️', search: '🔍', filter: '🔽' };
+  const typeColors = { deal_view: 'var(--accent-blue)', memo_generated: 'var(--accent-purple)', navigation: 'var(--accent-green)', credential_update: 'var(--accent-orange)', export: 'var(--accent-pink)', search: 'var(--accent-indigo)', filter: 'var(--text-muted)' };
+
+  area.innerHTML = `
+    <div class="radar-stats-row">
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-blue)">${ACTIVITY_LOG.filter(l => l.type === 'deal_view').length}</div><div class="stat-card-label">Deal Views</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-purple)">${ACTIVITY_LOG.filter(l => l.type === 'memo_generated').length}</div><div class="stat-card-label">Memos Generated</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-orange)">${ACTIVITY_LOG.filter(l => l.type === 'credential_update').length}</div><div class="stat-card-label">Credential Updates</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-green)">${ACTIVITY_LOG.length}</div><div class="stat-card-label">Total Actions</div></div>
+    </div>
+
+    <div class="phase3-panel">
+      <div class="log-header">
+        <h3 class="phase3-panel-title" style="margin-bottom:0">📜 Recent Activity</h3>
+        <button class="integration-connect-btn" id="clear-log-btn" style="background:var(--accent-red);font-size:0.75rem;padding:4px 12px">🗑️ Clear Log</button>
+      </div>
+      <div class="activity-list">
+        ${ACTIVITY_LOG.map(log => {
+    const t = new Date(log.time);
+    const timeStr = t.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    const dateStr = t.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    return `
+            <div class="activity-item">
+              <span class="activity-icon" style="color:${typeColors[log.type] || 'var(--text-muted)'}">${typeIcons[log.type] || '📌'}</span>
+              <div class="activity-info">
+                <span class="activity-msg">${log.message}</span>
+                <span class="activity-time">${dateStr}, ${timeStr}</span>
+              </div>
+              <span class="signal-tag" style="background:${typeColors[log.type] || 'var(--text-muted)'}22;color:${typeColors[log.type] || 'var(--text-muted)'};font-size:0.65rem">${log.type.replace('_', ' ')}</span>
+            </div>
+          `;
+  }).join('')}
+      </div>
+    </div>
+  `;
+
+  document.getElementById('clear-log-btn')?.addEventListener('click', () => {
+    ACTIVITY_LOG = [];
+    localStorage.setItem('jv_activity_log', JSON.stringify(ACTIVITY_LOG));
+    renderActivityLog(area);
+  });
+}
+
 // ---- Boot ----
-document.addEventListener('DOMContentLoaded', () => {
-  initSupabase();
-  initStreak();
-  // Gmail init deferred until GIS script loads
-  setTimeout(() => initGmail(), 1000);
-  init();
-});
+function boot() {
+  // Each init is independently wrapped — a CDN failure won't block the app
+  try { initSupabase(); } catch (e) { console.warn('Supabase init skipped:', e.message); }
+  try { initStreak(); } catch (e) { console.warn('Streak init skipped:', e.message); }
+  try { setTimeout(() => initGmail(), 1000); } catch (e) { console.warn('Gmail init skipped:', e.message); }
+
+  // CRITICAL: init() MUST run regardless of integration status
+  try {
+    init();
+    console.log('✅ Boot complete, deals:', rankedStartups.length);
+  } catch (e) {
+    console.error('❌ Boot error:', e);
+    document.getElementById('content-area').innerHTML = '<div style="padding:40px;color:#ef4444;font-size:16px;"><h2>⚠️ App Error</h2><pre style="color:#f59e0b;white-space:pre-wrap;">' + e.message + '\n\n' + e.stack + '</pre></div>';
+  }
+}
+
+// Self-boot: fire immediately since all deps loaded synchronously before this
+(function () {
+  if (typeof _booted !== 'undefined' && _booted) return;
+  try { boot(); } catch (e) { console.error('Self-boot failed:', e); }
+})();

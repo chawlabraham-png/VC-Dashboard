@@ -4,19 +4,19 @@
 // ============================================================
 
 function createSparkline(data, color = '#10b981', width = 80, height = 30) {
-    if (!data || data.length < 2) return '';
-    const max = Math.max(...data);
-    const min = Math.min(...data);
-    const range = max - min || 1;
-    const points = data.map((v, i) => {
-        const x = (i / (data.length - 1)) * width;
-        const y = height - ((v - min) / range) * (height - 4) - 2;
-        return `${x},${y}`;
-    });
+  if (!data || data.length < 2) return '';
+  const max = Math.max(...data);
+  const min = Math.min(...data);
+  const range = max - min || 1;
+  const points = data.map((v, i) => {
+    const x = (i / (data.length - 1)) * width;
+    const y = height - ((v - min) / range) * (height - 4) - 2;
+    return `${x},${y}`;
+  });
 
-    const gradientId = `sg-${Math.random().toString(36).slice(2, 8)}`;
+  const gradientId = `sg-${Math.random().toString(36).slice(2, 8)}`;
 
-    return `
+  return `
     <svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
       <defs>
         <linearGradient id="${gradientId}" x1="0" y1="0" x2="0" y2="1">
@@ -35,72 +35,72 @@ function createSparkline(data, color = '#10b981', width = 80, height = 30) {
 }
 
 function createRadarChart(dimensions, size = 240) {
-    const labels = [
-        { key: 'marketSize', label: 'Market' },
-        { key: 'founderPedigree', label: 'Founders' },
-        { key: 'earlyTraction', label: 'Traction' },
-        { key: 'productDifferentiation', label: 'Product' },
-        { key: 'fundability', label: 'Fundability' }
-    ];
+  const labels = [
+    { key: 'marketSize', label: 'Market' },
+    { key: 'founderPedigree', label: 'Founders' },
+    { key: 'earlyTraction', label: 'Traction' },
+    { key: 'productDifferentiation', label: 'Product' },
+    { key: 'fundability', label: 'Fundability' }
+  ];
 
-    const cx = size / 2;
-    const cy = size / 2;
-    const maxR = size * 0.38;
-    const n = labels.length;
-    const angleStep = (2 * Math.PI) / n;
-    const startAngle = -Math.PI / 2;
+  const cx = size / 2;
+  const cy = size / 2;
+  const maxR = size * 0.38;
+  const n = labels.length;
+  const angleStep = (2 * Math.PI) / n;
+  const startAngle = -Math.PI / 2;
 
-    // Grid rings
-    let gridRings = '';
-    for (let r = 1; r <= 4; r++) {
-        const radius = (r / 4) * maxR;
-        const pts = [];
-        for (let i = 0; i < n; i++) {
-            const angle = startAngle + i * angleStep;
-            pts.push(`${cx + radius * Math.cos(angle)},${cy + radius * Math.sin(angle)}`);
-        }
-        gridRings += `<polygon points="${pts.join(' ')}" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>`;
-    }
-
-    // Axis lines
-    let axes = '';
+  // Grid rings
+  let gridRings = '';
+  for (let r = 1; r <= 4; r++) {
+    const radius = (r / 4) * maxR;
+    const pts = [];
     for (let i = 0; i < n; i++) {
-        const angle = startAngle + i * angleStep;
-        const ex = cx + maxR * Math.cos(angle);
-        const ey = cy + maxR * Math.sin(angle);
-        axes += `<line x1="${cx}" y1="${cy}" x2="${ex}" y2="${ey}" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>`;
+      const angle = startAngle + i * angleStep;
+      pts.push(`${cx + radius * Math.cos(angle)},${cy + radius * Math.sin(angle)}`);
     }
+    gridRings += `<polygon points="${pts.join(' ')}" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>`;
+  }
 
-    // Data polygon
-    const dataPts = labels.map((l, i) => {
-        const val = (dimensions[l.key] || 0) / 100;
-        const angle = startAngle + i * angleStep;
-        const r = val * maxR;
-        return `${cx + r * Math.cos(angle)},${cy + r * Math.sin(angle)}`;
-    });
+  // Axis lines
+  let axes = '';
+  for (let i = 0; i < n; i++) {
+    const angle = startAngle + i * angleStep;
+    const ex = cx + maxR * Math.cos(angle);
+    const ey = cy + maxR * Math.sin(angle);
+    axes += `<line x1="${cx}" y1="${cy}" x2="${ex}" y2="${ey}" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>`;
+  }
 
-    // Labels
-    let labelEls = '';
-    labels.forEach((l, i) => {
-        const angle = startAngle + i * angleStep;
-        const lr = maxR + 22;
-        const lx = cx + lr * Math.cos(angle);
-        const ly = cy + lr * Math.sin(angle);
-        const val = dimensions[l.key] || 0;
-        labelEls += `<text x="${lx}" y="${ly}" text-anchor="middle" dominant-baseline="middle" fill="#94a3b8" font-size="10" font-family="Inter" font-weight="600">${l.label}</text>`;
-        labelEls += `<text x="${lx}" y="${ly + 13}" text-anchor="middle" dominant-baseline="middle" fill="#10b981" font-size="11" font-family="JetBrains Mono" font-weight="700">${val}</text>`;
-    });
+  // Data polygon
+  const dataPts = labels.map((l, i) => {
+    const val = (dimensions[l.key] || 0) / 100;
+    const angle = startAngle + i * angleStep;
+    const r = val * maxR;
+    return `${cx + r * Math.cos(angle)},${cy + r * Math.sin(angle)}`;
+  });
 
-    // Data dots
-    let dataDots = '';
-    labels.forEach((l, i) => {
-        const val = (dimensions[l.key] || 0) / 100;
-        const angle = startAngle + i * angleStep;
-        const r = val * maxR;
-        dataDots += `<circle cx="${cx + r * Math.cos(angle)}" cy="${cy + r * Math.sin(angle)}" r="3.5" fill="#10b981" stroke="#0a0e1a" stroke-width="2"/>`;
-    });
+  // Labels
+  let labelEls = '';
+  labels.forEach((l, i) => {
+    const angle = startAngle + i * angleStep;
+    const lr = maxR + 22;
+    const lx = cx + lr * Math.cos(angle);
+    const ly = cy + lr * Math.sin(angle);
+    const val = dimensions[l.key] || 0;
+    labelEls += `<text x="${lx}" y="${ly}" text-anchor="middle" dominant-baseline="middle" fill="#94a3b8" font-size="10" font-family="Inter" font-weight="600">${l.label}</text>`;
+    labelEls += `<text x="${lx}" y="${ly + 13}" text-anchor="middle" dominant-baseline="middle" fill="#10b981" font-size="11" font-family="JetBrains Mono" font-weight="700">${val}</text>`;
+  });
 
-    return `
+  // Data dots
+  let dataDots = '';
+  labels.forEach((l, i) => {
+    const val = (dimensions[l.key] || 0) / 100;
+    const angle = startAngle + i * angleStep;
+    const r = val * maxR;
+    dataDots += `<circle cx="${cx + r * Math.cos(angle)}" cy="${cy + r * Math.sin(angle)}" r="3.5" fill="#10b981" stroke="#0a0e1a" stroke-width="2"/>`;
+  });
+
+  return `
     <svg viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">
       ${gridRings}
       ${axes}
@@ -118,22 +118,22 @@ function createRadarChart(dimensions, size = 240) {
 }
 
 function getScoreColor(score) {
-    if (score >= 75) return '#10b981';
-    if (score >= 55) return '#f59e0b';
-    return '#6366f1';
+  if (score >= 75) return '#10b981';
+  if (score >= 55) return '#f59e0b';
+  return '#6366f1';
 }
 
 function getScoreClass(score) {
-    if (score >= 75) return 'score-hot';
-    if (score >= 55) return 'score-warm';
-    return 'score-watch';
+  if (score >= 75) return 'score-hot';
+  if (score >= 55) return 'score-warm';
+  return 'score-watch';
 }
 
 function getBarColor(score) {
-    if (score >= 80) return 'var(--accent-emerald)';
-    if (score >= 60) return 'var(--accent-teal)';
-    if (score >= 40) return 'var(--accent-amber)';
-    return 'var(--accent-indigo)';
+  if (score >= 80) return 'var(--accent-emerald)';
+  if (score >= 60) return 'var(--accent-teal)';
+  if (score >= 40) return 'var(--accent-amber)';
+  return 'var(--accent-indigo)';
 }
 
-export { createSparkline, createRadarChart, getScoreColor, getScoreClass, getBarColor };
+// Globals: createSparkline, createRadarChart, getScoreColor, getScoreClass, getBarColor

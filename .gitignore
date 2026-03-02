@@ -1,13 +1,5 @@
-# API Keys & Secrets
 config.js
-
-# OS files
 .DS_Store
-Thumbs.db
-
-# IDE
-.vscode/
-.idea/
-
-# Logs
 *.log
+node_modules/
+.env

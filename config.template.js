@@ -18,4 +18,4 @@ const CONFIG = {
     gmailScopes: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.labels',
 };
 
-export default CONFIG;
+// Global: CONFIG

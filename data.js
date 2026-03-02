@@ -4,7 +4,7 @@
 // Geographies: India, Singapore, Indonesia, Vietnam, Philippines
 // ============================================================
 
-const STARTUPS = [
+var STARTUPS = [
   {
     id: "st-001",
     name: "KartBee",
@@ -455,7 +455,7 @@ const STARTUPS = [
   }
 ];
 
-const SIGNAL_TYPES = [
+var SIGNAL_TYPES = [
   { key: "hiringSpike", label: "Hiring Spike", icon: "👥", color: "#6366f1" },
   { key: "founderExit", label: "Founder Exit", icon: "🚀", color: "#f59e0b" },
   { key: "viralTraction", label: "Viral Traction", icon: "📈", color: "#ec4899" },
@@ -464,7 +464,7 @@ const SIGNAL_TYPES = [
   { key: "angelFunding", label: "Angel Funding", icon: "💰", color: "#f97316" }
 ];
 
-const GEOGRAPHIES = ["All", "India", "Singapore", "Indonesia", "Vietnam", "Philippines"];
-const SECTORS = ["All", "Consumer Tech", "B2B Manufacturing"];
+var GEOGRAPHIES = ["All", "India", "Singapore", "Indonesia", "Vietnam", "Philippines"];
+var SECTORS = ["All", "Consumer Tech", "B2B Manufacturing"];
 
-export { STARTUPS, SIGNAL_TYPES, GEOGRAPHIES, SECTORS };
+// Globals: STARTUPS, SIGNAL_TYPES, GEOGRAPHIES, SECTORS
