@@ -45,17 +45,27 @@ let integrationState = {
   }
 };
 
-function initSupabase() {
+async function initSupabase() {
   try {
-    if (window.supabase) {
+    if (window.supabase && SUPABASE_URL && SUPABASE_KEY) {
       supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
       supabaseConnected = true;
       integrationState.supabase.connected = true;
       console.log('✅ Supabase connected:', SUPABASE_URL);
+
+      // Fetch deals from Supabase
+      const { data, error } = await supabase.from('startups').select('*');
+      if (error) throw error;
+
+      if (data && data.length > 0) {
+        console.log(`✅ Loaded ${data.length} deals from Supabase`);
+        return data; // Return live data
+      }
     }
   } catch (e) {
-    console.warn('Supabase init failed:', e);
+    console.warn('Supabase init/fetch failed, falling back to local data:', e);
   }
+  return null;
 }
 
 function initStreak() {
@@ -325,8 +335,16 @@ const EVAL_CHECKLIST = [
 ];
 
 // ---- Init ----
-function init() {
-  rankedStartups = rankStartups(STARTUPS);
+async function init() {
+  // Try loading from Supabase first
+  const liveData = await initSupabase();
+
+  if (liveData) {
+    rankedStartups = rankStartups(liveData);
+  } else {
+    console.log('Using local mock data fallback.');
+    rankedStartups = rankStartups(STARTUPS);
+  }
 
   // Set date
   const now = new Date();
@@ -2354,15 +2372,14 @@ function renderActivityLog(area) {
 }
 
 // ---- Boot ----
-function boot() {
+async function boot() {
   // Each init is independently wrapped — a CDN failure won't block the app
-  try { initSupabase(); } catch (e) { console.warn('Supabase init skipped:', e.message); }
   try { initStreak(); } catch (e) { console.warn('Streak init skipped:', e.message); }
   try { setTimeout(() => initGmail(), 1000); } catch (e) { console.warn('Gmail init skipped:', e.message); }
 
   // CRITICAL: init() MUST run regardless of integration status
   try {
-    init();
+    await init();
     console.log('✅ Boot complete, deals:', rankedStartups.length);
   } catch (e) {
     console.error('❌ Boot error:', e);
@@ -2371,7 +2388,8 @@ function boot() {
 }
 
 // Self-boot: fire immediately since all deps loaded synchronously before this
-(function () {
-  if (typeof _booted !== 'undefined' && _booted) return;
-  try { boot(); } catch (e) { console.error('Self-boot failed:', e); }
+(async function () {
+  if (typeof window._booted !== 'undefined' && window._booted) return;
+  window._booted = true;
+  try { await boot(); } catch (e) { console.error('Self-boot failed:', e); }
 })();
