@@ -426,6 +426,8 @@ function switchSection(section) {
     vccrm: 'Relationship Intelligence',
     networkmap: 'Co-Investment Network',
     competitive: 'Competitive Landscape',
+    publiccomps: 'Public Market Comps',
+    industryview: 'Industry Analyzer',
     lpreport: 'LP Quarterly Report',
     dealvelocity: 'Deal Velocity Tracker',
     admin: 'Admin Panel',
@@ -459,6 +461,8 @@ function renderCurrentSection() {
     case 'vccrm': renderVCCRM(area); break;
     case 'networkmap': renderNetworkMap(area); break;
     case 'competitive': renderCompetitive(area); break;
+    case 'publiccomps': renderPublicMarketComps(area); break;
+    case 'industryview': renderIndustryAnalyzer(area); break;
     case 'lpreport': renderLPReport(area); break;
     case 'dealvelocity': renderDealVelocity(area); break;
     case 'admin': renderAdmin(area); break;
@@ -2023,43 +2027,259 @@ const COMPETITORS = [
 function renderCompetitive(area) {
   const jv = { name: 'Jungle Ventures', aum: '$1.5B', focus: 'Seed-Series B', deals2025: 16, avgCheck: '$5M', color: 'var(--accent-green)' };
 
-  area.innerHTML = `
-    <div class="radar-stats-row">
-      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-green)">${COMPETITORS.length}</div><div class="stat-card-label">Tracked Competitors</div></div>
-      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-blue)">${COMPETITORS.reduce((a, c) => a + c.overlap, 0)}</div><div class="stat-card-label">Deal Overlaps</div></div>
-      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-purple)">${COMPETITORS.reduce((a, c) => a + c.deals2025, 0)}</div><div class="stat-card-label">Total Market Deals</div></div>
-      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-orange)">$${(COMPETITORS.reduce((a, c) => a + parseFloat(c.aum.replace('$', '')), 0)).toFixed(1)}B</div><div class="stat-card-label">Combined AUM</div></div>
-    </div>
+  // Fetch real comparisons from Supabase if available
+  const renderWithData = async () => {
+    let publicComps = [];
+    let sectorData = [];
+    let comparisons = [];
 
-    <div class="phase3-grid">
-      <div class="phase3-panel" style="flex:2">
-        <h3 class="phase3-panel-title">🏟️ Competitive Positioning</h3>
+    if (supabaseConnected && supabase) {
+      try {
+        const [compRes, sectorRes, comparisonRes] = await Promise.all([
+          supabase.from('public_companies').select('*').limit(20),
+          supabase.from('industry_sectors').select('*'),
+          supabase.from('startup_comparisons').select('*').limit(50)
+        ]);
+        publicComps = compRes.data || [];
+        sectorData = sectorRes.data || [];
+        comparisons = comparisonRes.data || [];
+      } catch (e) { console.warn('Competitive data fetch:', e.message); }
+    }
+
+    area.innerHTML = `
+      <div class="radar-stats-row">
+        <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-green)">${COMPETITORS.length}</div><div class="stat-card-label">Tracked VC Competitors</div></div>
+        <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-blue)">${publicComps.length}</div><div class="stat-card-label">Public Comps Tracked</div></div>
+        <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-purple)">${sectorData.length}</div><div class="stat-card-label">Industry Sectors</div></div>
+        <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-orange)">${comparisons.length}</div><div class="stat-card-label">Startup Comparisons</div></div>
+      </div>
+
+      <div class="phase3-grid">
+        <div class="phase3-panel" style="flex:2">
+          <h3 class="phase3-panel-title">🏟️ VC Competitive Positioning</h3>
+          <div class="comp-table-wrap">
+            <table class="comp-table">
+              <thead><tr><th>Fund</th><th>AUM</th><th>Focus</th><th>Deals '25</th><th>Avg Check</th><th>Overlap</th><th>Strengths</th></tr></thead>
+              <tbody>
+                <tr class="comp-row-jv"><td><strong>🌴 ${jv.name}</strong></td><td>${jv.aum}</td><td>${jv.focus}</td><td>${jv.deals2025}</td><td>${jv.avgCheck}</td><td>—</td><td>ASEAN focus, Speed, LP network</td></tr>
+                ${COMPETITORS.map(c => `<tr>
+                  <td><span style="color:${c.color}">●</span> ${c.name}</td><td>${c.aum}</td><td>${c.focus}</td><td>${c.deals2025}</td><td>${c.avgCheck}</td>
+                  <td><span class="comp-overlap">${c.overlap}</span></td>
+                  <td>${c.strengths.slice(0, 2).join(', ')}</td>
+                </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="phase3-panel" style="flex:1">
+          <h3 class="phase3-panel-title">⚔️ SWOT — Jungle Ventures</h3>
+          <div class="swot-grid">
+            <div class="swot-box swot-s"><div class="swot-label">Strengths</div><ul><li>Deep ASEAN network</li><li>Speed to term sheet</li><li>Founder-friendly terms</li><li>LP co-invest program</li></ul></div>
+            <div class="swot-box swot-w"><div class="swot-label">Weaknesses</div><ul><li>Smaller fund vs peers</li><li>Limited US presence</li><li>Brand awareness in India</li><li>Follow-on capacity</li></ul></div>
+            <div class="swot-box swot-o"><div class="swot-label">Opportunities</div><ul><li>Vietnam/Philippines growth</li><li>B2B Manufacturing boom</li><li>ESG/Climate tech wave</li><li>Web3 infrastructure</li></ul></div>
+            <div class="swot-box swot-t"><div class="swot-label">Threats</div><ul><li>Tiger/Coatue return</li><li>Local fund scaling</li><li>LP allocation shifts</li><li>Macro downturn</li></ul></div>
+          </div>
+        </div>
+      </div>
+
+      ${publicComps.length > 0 ? `
+      <div class="phase3-panel" style="margin-top:16px">
+        <h3 class="phase3-panel-title">📈 Public Market Comparables (Live)</h3>
         <div class="comp-table-wrap">
           <table class="comp-table">
-            <thead><tr><th>Fund</th><th>AUM</th><th>Focus</th><th>Deals '25</th><th>Avg Check</th><th>Overlap</th><th>Strengths</th></tr></thead>
+            <thead><tr><th>Ticker</th><th>Company</th><th>Exchange</th><th>Sector</th><th>Market Cap ($B)</th><th>P/E</th><th>Revenue ($M)</th><th>Rev Growth</th></tr></thead>
             <tbody>
-              <tr class="comp-row-jv"><td><strong>🌴 ${jv.name}</strong></td><td>${jv.aum}</td><td>${jv.focus}</td><td>${jv.deals2025}</td><td>${jv.avgCheck}</td><td>—</td><td>ASEAN focus, Speed, LP network</td></tr>
-              ${COMPETITORS.map(c => `<tr>
-                <td><span style="color:${c.color}">●</span> ${c.name}</td><td>${c.aum}</td><td>${c.focus}</td><td>${c.deals2025}</td><td>${c.avgCheck}</td>
-                <td><span class="comp-overlap">${c.overlap}</span></td>
-                <td>${c.strengths.slice(0, 2).join(', ')}</td>
+              ${publicComps.map(c => `<tr>
+                <td><strong style="color:var(--accent-blue)">${c.ticker}</strong></td>
+                <td>${c.name}</td>
+                <td><span class="signal-tag" style="background:var(--bg-tertiary);color:var(--text-secondary)">${c.exchange || '—'}</span></td>
+                <td>${c.sector_id || '—'}</td>
+                <td>${c.market_cap_usd_bn ? '$' + c.market_cap_usd_bn.toFixed(1) + 'B' : '—'}</td>
+                <td>${c.pe_ratio ? c.pe_ratio.toFixed(1) + 'x' : '—'}</td>
+                <td>${c.revenue_usd_mn ? '$' + c.revenue_usd_mn.toFixed(0) + 'M' : '—'}</td>
+                <td style="color:${(c.revenue_growth_pct || 0) >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'}">${c.revenue_growth_pct ? c.revenue_growth_pct.toFixed(1) + '%' : '—'}</td>
               </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>` : ''}
+
+      ${sectorData.length > 0 ? `
+      <div class="phase3-panel" style="margin-top:16px">
+        <h3 class="phase3-panel-title">🏭 Sector Intelligence</h3>
+        <div class="phase3-grid" style="flex-wrap:wrap">
+          ${sectorData.slice(0, 8).map(s => `
+          <div class="stat-card" style="flex:1;min-width:200px;cursor:pointer" onclick="switchSection('industryview')">
+            <div class="stat-card-value" style="font-size:1rem;color:var(--accent-blue)">${s.sector_name}</div>
+            <div class="stat-card-label">
+              ${s.market_size_usd_bn ? 'Market: $' + s.market_size_usd_bn + 'B' : ''}
+              ${s.cagr_pct ? ' · CAGR: ' + s.cagr_pct + '%' : ''}
+            </div>
+            ${s.key_trends ? '<div style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap">' + s.key_trends.slice(0, 2).map(t => '<span class="signal-tag" style="font-size:0.6rem;background:var(--accent-blue)22;color:var(--accent-blue)">' + t + '</span>').join('') + '</div>' : ''}
+          </div>`).join('')}
+        </div>
+      </div>` : ''}
+    `;
+  };
+  renderWithData();
+}
+
+// ---- Public Market Comps Module ----
+function renderPublicMarketComps(area) {
+  const renderAsync = async () => {
+    let companies = [];
+    let sectors = [];
+    let comps = [];
+
+    if (supabaseConnected && supabase) {
+      try {
+        const [cRes, sRes, mRes] = await Promise.all([
+          supabase.from('public_companies').select('*').order('market_cap_usd_bn', { ascending: false }),
+          supabase.from('industry_sectors').select('*'),
+          supabase.from('public_market_comps').select('*')
+        ]);
+        companies = cRes.data || [];
+        sectors = sRes.data || [];
+        comps = mRes.data || [];
+      } catch (e) { console.warn('Public comps fetch:', e.message); }
+    }
+
+    const totalMarketCap = companies.reduce((a, c) => a + (c.market_cap_usd_bn || 0), 0);
+    const avgPE = companies.filter(c => c.pe_ratio).length > 0 ? (companies.reduce((a, c) => a + (c.pe_ratio || 0), 0) / companies.filter(c => c.pe_ratio).length).toFixed(1) : '—';
+    const exchanges = [...new Set(companies.map(c => c.exchange).filter(Boolean))];
+
+    area.innerHTML = `
+      <div class="radar-stats-row">
+        <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-green)">${companies.length}</div><div class="stat-card-label">Companies Tracked</div></div>
+        <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-blue)">$${totalMarketCap.toFixed(0)}B</div><div class="stat-card-label">Total Market Cap</div></div>
+        <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-purple)">${avgPE}x</div><div class="stat-card-label">Avg P/E Ratio</div></div>
+        <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-orange)">${exchanges.length}</div><div class="stat-card-label">Exchanges Covered</div></div>
+      </div>
+
+      <div class="phase3-panel">
+        <h3 class="phase3-panel-title">📊 Public Market Comparables</h3>
+        <p style="color:var(--text-muted);margin-bottom:12px">Track public company benchmarks to value private startups. Data refreshed daily via Yahoo Finance.</p>
+        <div class="comp-table-wrap">
+          <table class="comp-table">
+            <thead><tr><th>Ticker</th><th>Company</th><th>Exchange</th><th>Sector</th><th>Market Cap</th><th>P/E</th><th>Revenue</th><th>Growth</th><th>52W Range</th></tr></thead>
+            <tbody>
+              ${companies.length > 0 ? companies.map(c => `<tr>
+                <td><strong style="color:var(--accent-blue)">${c.ticker}</strong></td>
+                <td>${c.name}</td>
+                <td><span class="signal-tag" style="background:var(--bg-tertiary);color:var(--text-secondary);font-size:0.7rem">${c.exchange || '—'}</span></td>
+                <td>${c.sector_id || '—'}</td>
+                <td>${c.market_cap_usd_bn ? '$' + c.market_cap_usd_bn.toFixed(1) + 'B' : '<span style="color:var(--text-muted)">Awaiting data</span>'}</td>
+                <td>${c.pe_ratio ? c.pe_ratio.toFixed(1) + 'x' : '—'}</td>
+                <td>${c.revenue_usd_mn ? '$' + c.revenue_usd_mn.toFixed(0) + 'M' : '—'}</td>
+                <td style="color:${(c.revenue_growth_pct || 0) >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'}">${c.revenue_growth_pct ? (c.revenue_growth_pct > 0 ? '+' : '') + c.revenue_growth_pct.toFixed(1) + '%' : '—'}</td>
+                <td style="font-size:0.75rem">${c.price_52w_low && c.price_52w_high ? '$' + c.price_52w_low.toFixed(0) + ' – $' + c.price_52w_high.toFixed(0) : '—'}</td>
+              </tr>`).join('') : '<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:24px">Run the Phase 3 migration SQL to seed public company data, then activate the Yahoo Finance n8n workflow to populate live prices.</td></tr>'}
             </tbody>
           </table>
         </div>
       </div>
 
-      <div class="phase3-panel" style="flex:1">
-        <h3 class="phase3-panel-title">⚔️ SWOT — Jungle Ventures</h3>
-        <div class="swot-grid">
-          <div class="swot-box swot-s"><div class="swot-label">Strengths</div><ul><li>Deep ASEAN network</li><li>Speed to term sheet</li><li>Founder-friendly terms</li><li>LP co-invest program</li></ul></div>
-          <div class="swot-box swot-w"><div class="swot-label">Weaknesses</div><ul><li>Smaller fund vs peers</li><li>Limited US presence</li><li>Brand awareness in India</li><li>Follow-on capacity</li></ul></div>
-          <div class="swot-box swot-o"><div class="swot-label">Opportunities</div><ul><li>Vietnam/Philippines growth</li><li>B2B Manufacturing boom</li><li>ESG/Climate tech wave</li><li>Web3 infrastructure</li></ul></div>
-          <div class="swot-box swot-t"><div class="swot-label">Threats</div><ul><li>Tiger/Coatue return</li><li>Local fund scaling</li><li>LP allocation shifts</li><li>Macro downturn</li></ul></div>
+      ${comps.length > 0 ? `
+      <div class="phase3-panel" style="margin-top:16px">
+        <h3 class="phase3-panel-title">🔗 Startup → Public Company Mappings</h3>
+        <div class="comp-table-wrap">
+          <table class="comp-table">
+            <thead><tr><th>Startup</th><th>Public Comparable</th><th>Type</th><th>Multiple</th><th>Notes</th></tr></thead>
+            <tbody>
+              ${comps.map(m => `<tr>
+                <td><strong>${m.startup_name}</strong></td>
+                <td style="color:var(--accent-blue)">${m.ticker}</td>
+                <td><span class="signal-tag" style="background:var(--accent-purple)22;color:var(--accent-purple);font-size:0.7rem">${m.comp_type || '—'}</span></td>
+                <td>${m.valuation_multiple ? m.valuation_multiple.toFixed(1) + 'x' : '—'}</td>
+                <td style="color:var(--text-muted)">${m.notes || '—'}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>` : ''}
+    `;
+  };
+  renderAsync();
+}
+
+// ---- Industry Analyzer Module ----
+function renderIndustryAnalyzer(area) {
+  const renderAsync = async () => {
+    let sectors = [];
+    let companies = [];
+    let news = [];
+
+    if (supabaseConnected && supabase) {
+      try {
+        const [sRes, cRes, nRes] = await Promise.all([
+          supabase.from('industry_sectors').select('*').order('market_size_usd_bn', { ascending: false }),
+          supabase.from('public_companies').select('*'),
+          supabase.from('news_signals').select('*').order('published_at', { ascending: false }).limit(20)
+        ]);
+        sectors = sRes.data || [];
+        companies = cRes.data || [];
+        news = nRes.data || [];
+      } catch (e) { console.warn('Industry data fetch:', e.message); }
+    }
+
+    const totalMarketSize = sectors.reduce((a, s) => a + (s.market_size_usd_bn || 0), 0);
+    const avgCAGR = sectors.length > 0 ? (sectors.reduce((a, s) => a + (s.cagr_pct || 0), 0) / sectors.length).toFixed(1) : '—';
+    const pipelineByIndustry = {};
+    rankedStartups.forEach(s => {
+      const sector = s.sector || 'Other';
+      pipelineByIndustry[sector] = (pipelineByIndustry[sector] || 0) + 1;
+    });
+
+    area.innerHTML = `
+      <div class="radar-stats-row">
+        <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-green)">${sectors.length}</div><div class="stat-card-label">Sectors Tracked</div></div>
+        <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-blue)">$${totalMarketSize.toFixed(0)}B</div><div class="stat-card-label">Total Addressable Market</div></div>
+        <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-purple)">${avgCAGR}%</div><div class="stat-card-label">Avg Sector CAGR</div></div>
+        <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-orange)">${news.length}</div><div class="stat-card-label">Recent Signals</div></div>
+      </div>
+
+      <div class="phase3-grid">
+        <div class="phase3-panel" style="flex:2">
+          <h3 class="phase3-panel-title">🏭 Sector Deep Dive</h3>
+          <div class="comp-table-wrap">
+            <table class="comp-table">
+              <thead><tr><th>Sector</th><th>Market Size</th><th>CAGR</th><th>Public Comps</th><th>Pipeline Deals</th><th>Key Trends</th></tr></thead>
+              <tbody>
+                ${sectors.length > 0 ? sectors.map(s => {
+      const sCompanies = companies.filter(c => c.sector_id === s.sector_id);
+      const dealCount = pipelineByIndustry[s.sector_name] || 0;
+      return `<tr>
+                    <td><strong>${s.sector_name}</strong></td>
+                    <td>${s.market_size_usd_bn ? '$' + s.market_size_usd_bn + 'B' : '—'}</td>
+                    <td style="color:${(s.cagr_pct || 0) > 15 ? 'var(--accent-green)' : 'var(--text-secondary)'}">${s.cagr_pct ? s.cagr_pct + '%' : '—'}</td>
+                    <td>${sCompanies.length > 0 ? sCompanies.map(c => '<span style="color:var(--accent-blue);font-size:0.75rem">' + c.ticker + '</span>').join(', ') : '<span style="color:var(--text-muted)">—</span>'}</td>
+                    <td>${dealCount > 0 ? '<strong style="color:var(--accent-green)">' + dealCount + '</strong>' : '0'}</td>
+                    <td>${s.key_trends ? s.key_trends.slice(0, 3).map(t => '<span class="signal-tag" style="font-size:0.6rem;background:var(--accent-blue)22;color:var(--accent-blue)">' + t + '</span>').join(' ') : '—'}</td>
+                  </tr>`;
+    }).join('') : '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px">Run Phase 3 migration SQL to populate sector data.</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="phase3-panel" style="flex:1">
+          <h3 class="phase3-panel-title">📰 Latest Sector Signals</h3>
+          <div class="coinvestor-list">
+            ${news.length > 0 ? news.slice(0, 8).map(n => `
+              <div class="coinvestor-item" style="cursor:pointer" onclick="window.open('${n.url}','_blank')">
+                <div class="coinvestor-info">
+                  <div class="coinvestor-name" style="font-size:0.8rem">${n.headline}</div>
+                  <div class="coinvestor-deals">${n.source || '—'} · ${n.sector_id || '—'} · ${n.published_at ? new Date(n.published_at).toLocaleDateString() : ''}</div>
+                </div>
+                <span class="signal-tag" style="font-size:0.6rem;background:${n.sentiment === 'positive' ? 'var(--accent-green)' : n.sentiment === 'negative' ? 'var(--accent-red)' : 'var(--accent-blue)'}22;color:${n.sentiment === 'positive' ? 'var(--accent-green)' : n.sentiment === 'negative' ? 'var(--accent-red)' : 'var(--accent-blue)'}">${n.sentiment || 'neutral'}</span>
+              </div>`).join('') : '<div style="padding:16px;color:var(--text-muted);text-align:center">News signals will appear once the RSS scraper n8n workflow is activated.</div>'}
+          </div>
         </div>
       </div>
-    </div>
-  `;
+    `;
+  };
+  renderAsync();
 }
 
 // ---- LP Report Generator ----
