@@ -15,6 +15,7 @@ if (typeof CONFIG === 'undefined') {
 
 // ---- State ----
 let rankedStartups = [];
+let streakDeals = [];  // Real Streak CRM deals
 let currentSection = 'dealflow';
 let filters = { geo: 'All', sector: 'All', tier: 'All', search: '' };
 let uploadedDecks = [];
@@ -53,13 +54,30 @@ async function initSupabase() {
       integrationState.supabase.connected = true;
       console.log('✅ Supabase connected:', SUPABASE_URL);
 
-      // Fetch deals from Supabase
+      // Fetch scored startups from Supabase
       const { data, error } = await supabase.from('startups').select('*');
       if (error) throw error;
 
+      // Also fetch real Streak CRM deals
+      try {
+        const { data: sDeals, error: sErr } = await supabase
+          .from('streak_deals')
+          .select('*, streak_stages(stage_name, color, sort_order)')
+          .order('updated_at', { ascending: false });
+        if (!sErr && sDeals && sDeals.length > 0) {
+          streakDeals = sDeals;
+          integrationState.streak.connected = true;
+          integrationState.streak.lastSync = new Date();
+          integrationState.streak.dealCount = sDeals.length;
+          console.log(`✅ Loaded ${sDeals.length} Streak deals from Supabase`);
+        }
+      } catch (e2) {
+        console.warn('Streak deals fetch skipped:', e2.message);
+      }
+
       if (data && data.length > 0) {
-        console.log(`✅ Loaded ${data.length} deals from Supabase`);
-        return data; // Return live data
+        console.log(`✅ Loaded ${data.length} scored deals from Supabase`);
+        return data;
       }
     }
   } catch (e) {
@@ -350,6 +368,11 @@ async function init() {
   const now = new Date();
   document.getElementById('report-date').textContent = now.toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
   document.getElementById('deal-count-badge').textContent = rankedStartups.length;
+
+  // Log integration status
+  if (streakDeals.length > 0) {
+    console.log(`📊 Dashboard loaded: ${rankedStartups.length} scored deals + ${streakDeals.length} Streak CRM deals`);
+  }
 
   // Bind navigation
   document.querySelectorAll('.nav-item').forEach(item => {
