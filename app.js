@@ -1965,6 +1965,7 @@ function renderNetworkMap(area) {
     <text x="${n.x}" y="${n.y + 44 + n.deals * 3}" text-anchor="middle" fill="var(--text-muted)" font-size="9" font-family="Inter">${n.deals} co-deals</text>
   `).join('');
 
+  // Render co-investor network first
   area.innerHTML = `
     <div class="phase3-grid">
       <div class="phase3-panel" style="flex:2">
@@ -2007,7 +2008,147 @@ function renderNetworkMap(area) {
         </div>
       </div>
     </div>
+
+    <div id="startup-linker-section"></div>
   `;
+
+  // Async: fetch real data from Supabase for the Startup Linker
+  (async () => {
+    const linkerEl = document.getElementById('startup-linker-section');
+    if (!linkerEl) return;
+
+    let sectors = [], companies = [], comparisons = [], comps = [];
+    if (supabaseConnected && supabase) {
+      try {
+        const [sRes, cRes, compRes, mRes] = await Promise.all([
+          supabase.from('industry_sectors').select('*'),
+          supabase.from('public_companies').select('*'),
+          supabase.from('startup_comparisons').select('*').limit(50),
+          supabase.from('public_market_comps').select('*')
+        ]);
+        sectors = sRes.data || [];
+        companies = cRes.data || [];
+        comparisons = compRes.data || [];
+        comps = mRes.data || [];
+      } catch (e) { console.warn('Linker data:', e.message); }
+    }
+
+    // Build the sector cluster visualization
+    const sectorColors = {
+      fintech: '#6366f1', edtech: '#f59e0b', healthtech: '#ef4444', ecommerce: '#10b981',
+      saas: '#3b82f6', logistics: '#f97316', deeptech: '#8b5cf6', cleantech: '#22c55e',
+      consumer: '#ec4899', proptech: '#14b8a6', gaming: '#a855f7', insurance: '#06b6d4'
+    };
+
+    // Group companies by sector
+    const sectorGroups = {};
+    companies.forEach(c => {
+      const sid = c.sector_id || 'other';
+      if (!sectorGroups[sid]) sectorGroups[sid] = [];
+      sectorGroups[sid].push(c);
+    });
+
+    // Build sector cluster SVG
+    const sectorKeys = Object.keys(sectorGroups);
+    const clusterRadius = 220;
+    const clusterCX = 400, clusterCY = 280;
+    let clusterSVG = '';
+    let clusterNodes = '';
+
+    sectorKeys.forEach((sid, i) => {
+      const angle = (i / sectorKeys.length) * Math.PI * 2 - Math.PI / 2;
+      const cx = clusterCX + Math.cos(angle) * clusterRadius;
+      const cy = clusterCY + Math.sin(angle) * clusterRadius;
+      const color = sectorColors[sid] || '#64748b';
+      const sectorName = sectors.find(s => s.sector_id === sid)?.sector_name || sid;
+      const count = sectorGroups[sid].length;
+
+      // Line from center to sector cluster
+      clusterSVG += `<line x1="${clusterCX}" y1="${clusterCY}" x2="${cx}" y2="${cy}" stroke="${color}" stroke-width="2" opacity="0.3" stroke-dasharray="5,5"/>`;
+
+      // Sector cluster node
+      clusterNodes += `
+        <circle cx="${cx}" cy="${cy}" r="${18 + count * 4}" fill="${color}" opacity="0.15"/>
+        <circle cx="${cx}" cy="${cy}" r="${14 + count * 3}" fill="${color}" opacity="0.7"/>
+        <text x="${cx}" y="${cy + 3}" text-anchor="middle" fill="white" font-size="9" font-weight="600" font-family="Inter">${count}</text>
+        <text x="${cx}" y="${cy + 28 + count * 3}" text-anchor="middle" fill="var(--text-secondary)" font-size="10" font-family="Inter">${sectorName}</text>
+      `;
+
+      // Small nodes for each company in this cluster
+      sectorGroups[sid].forEach((comp, j) => {
+        const subAngle = angle + ((j - count / 2) * 0.3);
+        const subR = clusterRadius + 50 + j * 15;
+        const sx = clusterCX + Math.cos(subAngle) * subR;
+        const sy = clusterCY + Math.sin(subAngle) * subR;
+        clusterSVG += `<line x1="${cx}" y1="${cy}" x2="${sx}" y2="${sy}" stroke="${color}" stroke-width="1" opacity="0.2"/>`;
+        clusterNodes += `
+          <circle cx="${sx}" cy="${sy}" r="6" fill="${color}" opacity="0.5"/>
+          <text x="${sx}" y="${sy + 16}" text-anchor="middle" fill="var(--text-muted)" font-size="7" font-family="JetBrains Mono">${comp.ticker.split('.')[0]}</text>
+        `;
+      });
+    });
+
+    // Pipeline startups in the center cluster
+    const pipelineStartups = rankedStartups.slice(0, 6);
+    pipelineStartups.forEach((s, i) => {
+      const angle = (i / pipelineStartups.length) * Math.PI * 2;
+      const px = clusterCX + Math.cos(angle) * 60;
+      const py = clusterCY + Math.sin(angle) * 60;
+      clusterSVG += `<line x1="${clusterCX}" y1="${clusterCY}" x2="${px}" y2="${py}" stroke="var(--accent-green)" stroke-width="1.5" opacity="0.4"/>`;
+      clusterNodes += `
+        <circle cx="${px}" cy="${py}" r="8" fill="var(--accent-green)" opacity="0.8"/>
+        <text x="${px}" y="${py + 18}" text-anchor="middle" fill="var(--accent-green)" font-size="8" font-weight="500" font-family="Inter">${s.name}</text>
+      `;
+    });
+
+    linkerEl.innerHTML = `
+      <div class="phase3-grid" style="margin-top:16px">
+        <div class="phase3-panel" style="flex:2">
+          <h3 class="phase3-panel-title">🔗 Startup Linker Graph</h3>
+          <p style="color:var(--text-muted);font-size:0.8rem;margin-bottom:8px">Sector clusters → Public comparables → Pipeline startups. Lines show relationships.</p>
+          <div class="network-svg-wrap">
+            <svg viewBox="0 0 800 560" class="network-svg">
+              ${clusterSVG}
+              <circle cx="${clusterCX}" cy="${clusterCY}" r="22" fill="var(--accent-green)" opacity="0.9"/>
+              <text x="${clusterCX}" y="${clusterCY + 4}" text-anchor="middle" fill="white" font-size="9" font-weight="700" font-family="Inter">Pipeline</text>
+              ${clusterNodes}
+            </svg>
+          </div>
+        </div>
+
+        <div class="phase3-panel" style="flex:1">
+          <h3 class="phase3-panel-title">📊 Sector Coverage</h3>
+          <div class="coinvestor-list">
+            ${sectorKeys.map(sid => {
+      const sectorName = sectors.find(s => s.sector_id === sid)?.sector_name || sid;
+      const color = sectorColors[sid] || '#64748b';
+      const count = sectorGroups[sid].length;
+      return `<div class="coinvestor-item">
+                <span style="color:${color};font-size:1.2rem;margin-right:8px">●</span>
+                <div class="coinvestor-info">
+                  <div class="coinvestor-name">${sectorName}</div>
+                  <div class="coinvestor-deals">${sectorGroups[sid].map(c => c.ticker.split('.')[0]).join(', ')}</div>
+                </div>
+                <div class="coinvestor-count" style="color:${color}">${count}</div>
+              </div>`;
+    }).join('')}
+          </div>
+
+          ${comparisons.length > 0 ? `
+          <h3 class="phase3-panel-title" style="margin-top:16px">⚔️ Startup Matches</h3>
+          <div class="coinvestor-list">
+            ${comparisons.slice(0, 8).map(c => `<div class="coinvestor-item">
+              <div class="coinvestor-info">
+                <div class="coinvestor-name" style="font-size:0.8rem">${c.startup_a} ↔ ${c.startup_b}</div>
+                <div class="coinvestor-deals">${c.relationship || '—'} · ${c.source || '—'}</div>
+              </div>
+              <div class="coinvestor-count" style="color:var(--accent-purple)">${c.similarity_score || '—'}%</div>
+            </div>`).join('')}
+          </div>` : ''}
+        </div>
+      </div>
+    `;
+  })();
 }
 
 // ============================================================
