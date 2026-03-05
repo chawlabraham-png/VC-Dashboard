@@ -19,6 +19,8 @@ let streakDeals = [];  // Real Streak CRM deals
 let currentSection = 'dealflow';
 let filters = { geo: 'All', sector: 'All', tier: 'All', search: '' };
 let uploadedDecks = [];
+let currentUser = null;  // Gmail auth user
+let pipelineTab = 'all'; // 'all', 'streak', 'scored'
 
 // ---- Supabase ----
 const SUPABASE_URL = CONFIG.supabaseUrl || '';
@@ -487,32 +489,50 @@ function getFilteredStartups() {
   });
 }
 
+// Streak stage name mapper
+const STREAK_STAGE_NAMES = {
+  '5001': 'Lead', '5002': 'Met + Active', '5003': 'Deep Dive',
+  '5004': 'IC Review', '5007': 'Term Sheet', '5011': 'Portfolio',
+  '5014': 'Passed', '5018': 'Dead'
+};
+const STREAK_STAGE_COLORS = {
+  '5001': '#64748b', '5002': '#3b82f6', '5003': '#8b5cf6',
+  '5004': '#f59e0b', '5007': '#10b981', '5011': '#22c55e',
+  '5014': '#ef4444', '5018': '#6b7280'
+};
+
 function renderDealFlow(area) {
   const filtered = getFilteredStartups();
   const hot = filtered.filter(s => s.scores.tier.class === 'tier-hot').length;
-  const warm = filtered.filter(s => s.scores.tier.class === 'tier-warm').length;
   const avgScore = filtered.length ? Math.round(filtered.reduce((a, s) => a + s.scores.composite, 0) / filtered.length) : 0;
+  const totalDeals = filtered.length + streakDeals.length;
 
-  const todaySignals = filtered.reduce((acc, s) => {
-    return acc + Object.values(s.signals).filter(sig => sig.score >= 75).length;
-  }, 0);
+  // Filter streak deals
+  const filteredStreak = streakDeals.filter(d => {
+    if (filters.search) {
+      const q = filters.search;
+      if (!d.name.toLowerCase().includes(q) && !(d.country || '').toLowerCase().includes(q)) return false;
+    }
+    if (filters.geo !== 'All' && d.country !== filters.geo) return false;
+    return true;
+  });
 
   area.innerHTML = `
     <div class="stats-bar">
       <div class="stat-card">
-        <div class="stat-label">Deals Tracked</div>
-        <div class="stat-value emerald">${filtered.length}</div>
-        <div class="stat-change positive">↑ across ${new Set(filtered.map(s => s.geography)).size} markets</div>
+        <div class="stat-label">Total Deals</div>
+        <div class="stat-value emerald">${totalDeals}</div>
+        <div class="stat-change positive">${filtered.length} scored + ${streakDeals.length} Streak</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Streak CRM Deals</div>
+        <div class="stat-value blue">${streakDeals.length}</div>
+        <div class="stat-change positive">🔄 Synced from Streak</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Hot Deals</div>
         <div class="stat-value orange">${hot}</div>
         <div class="stat-change positive">🔥 Immediate attention</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Strong Signals Today</div>
-        <div class="stat-value pink">${todaySignals}</div>
-        <div class="stat-change positive">Signals scoring 75+</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Average Score</div>
@@ -521,18 +541,316 @@ function renderDealFlow(area) {
       </div>
     </div>
 
+    <div class="pipeline-tabs" style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
+      <button class="pipeline-tab ${pipelineTab === 'all' ? 'active' : ''}" data-tab="all" style="padding:6px 16px;border-radius:8px;border:1px solid var(--border-primary);background:${pipelineTab === 'all' ? 'var(--accent-blue)' : 'var(--bg-secondary)'};color:${pipelineTab === 'all' ? 'white' : 'var(--text-secondary)'};cursor:pointer;font-size:0.8rem">All Deals (${totalDeals})</button>
+      <button class="pipeline-tab ${pipelineTab === 'streak' ? 'active' : ''}" data-tab="streak" style="padding:6px 16px;border-radius:8px;border:1px solid var(--border-primary);background:${pipelineTab === 'streak' ? 'var(--accent-purple)' : 'var(--bg-secondary)'};color:${pipelineTab === 'streak' ? 'white' : 'var(--text-secondary)'};cursor:pointer;font-size:0.8rem">🔄 Streak CRM (${streakDeals.length})</button>
+      <button class="pipeline-tab ${pipelineTab === 'scored' ? 'active' : ''}" data-tab="scored" style="padding:6px 16px;border-radius:8px;border:1px solid var(--border-primary);background:${pipelineTab === 'scored' ? 'var(--accent-green)' : 'var(--bg-secondary)'};color:${pipelineTab === 'scored' ? 'white' : 'var(--text-secondary)'};cursor:pointer;font-size:0.8rem">📊 Scored Deals (${filtered.length})</button>
+      <div style="flex:1"></div>
+      <button id="add-deal-btn" style="padding:6px 16px;border-radius:8px;border:none;background:var(--accent-green);color:white;cursor:pointer;font-size:0.8rem;font-weight:600">+ Add Deal</button>
+    </div>
+
     <div class="deal-grid">
-      ${filtered.map((s, i) => renderDealCard(s, i)).join('')}
+      ${(pipelineTab === 'all' || pipelineTab === 'streak') ? filteredStreak.map((d, i) => renderStreakDealCard(d, i)).join('') : ''}
+      ${(pipelineTab === 'all' || pipelineTab === 'scored') ? filtered.map((s, i) => renderDealCard(s, i)).join('') : ''}
+      ${totalDeals === 0 ? '<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--text-muted)">No deals found. Add deals manually or sync from Streak CRM.</div>' : ''}
     </div>
   `;
 
-  // Bind card clicks
-  area.querySelectorAll('.deal-card').forEach(card => {
+  // Tab clicks
+  area.querySelectorAll('.pipeline-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      pipelineTab = tab.dataset.tab;
+      renderDealFlow(area);
+    });
+  });
+
+  // Add deal button
+  document.getElementById('add-deal-btn')?.addEventListener('click', () => openAddDealModal());
+
+  // Scored deal card clicks
+  area.querySelectorAll('.deal-card[data-id]').forEach(card => {
     card.addEventListener('click', () => {
       const id = card.dataset.id;
       const startup = rankedStartups.find(s => s.id === id);
       if (startup) openDealModal(startup);
     });
+  });
+
+  // Streak deal card clicks
+  area.querySelectorAll('.streak-deal-card[data-boxkey]').forEach(card => {
+    card.addEventListener('click', () => {
+      const key = card.dataset.boxkey;
+      const deal = streakDeals.find(d => d.box_key === key);
+      if (deal) openStreakDealModal(deal);
+    });
+  });
+}
+
+function renderStreakDealCard(d, idx) {
+  const stageName = STREAK_STAGE_NAMES[d.stage_key] || d.stage_key || 'Unknown';
+  const stageColor = STREAK_STAGE_COLORS[d.stage_key] || '#64748b';
+  const assignees = (() => { try { return JSON.parse(d.assigned_to || '[]'); } catch { return []; } })();
+  const updatedDate = d.updated_at ? new Date(parseInt(d.updated_at)).toLocaleDateString() : '';
+
+  return `
+    <div class="deal-card streak-deal-card animated-item" data-boxkey="${d.box_key}" style="border-left:3px solid ${stageColor}">
+      <div class="deal-info">
+        <div class="deal-header">
+          <div class="deal-logo">🔄</div>
+          <div class="deal-name">${d.name}</div>
+          <span class="deal-tier-badge" style="background:${stageColor}22;color:${stageColor};border:1px solid ${stageColor}44">${stageName}</span>
+        </div>
+        <div class="deal-meta">
+          ${d.funding_stage ? `<span class="deal-tag">${d.funding_stage}</span>` : ''}
+          ${d.country ? `<span class="deal-tag geo">📍 ${d.country}</span>` : ''}
+          ${d.deal_size ? `<span class="deal-tag">💰 ${d.deal_size}</span>` : ''}
+          <span class="deal-tag" style="background:var(--accent-purple)15;color:var(--accent-purple)">Streak</span>
+        </div>
+        ${d.notes ? `<div style="font-size:0.75rem;color:var(--text-muted);margin-top:6px;max-height:32px;overflow:hidden">${d.notes.substring(0, 100)}${d.notes.length > 100 ? '...' : ''}</div>` : ''}
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;min-width:80px">
+        <div style="font-size:0.7rem;color:var(--text-muted)">${updatedDate}</div>
+        <div style="display:flex;gap:2px">
+          ${assignees.slice(0, 3).map(a => `<span title="${a.name || a.email}" style="width:22px;height:22px;border-radius:50%;background:var(--accent-blue);color:white;font-size:0.55rem;display:flex;align-items:center;justify-content:center">${(a.name || 'U').split(' ').map(n => n[0]).join('').substring(0, 2)}</span>`).join('')}
+        </div>
+        <div style="font-size:0.65rem;color:var(--text-muted)">${d.total_emails || 0} emails</div>
+      </div>
+    </div>
+  `;
+}
+
+function openStreakDealModal(d) {
+  const modal = document.getElementById('modal-overlay');
+  const content = document.getElementById('modal-content');
+  const stageName = STREAK_STAGE_NAMES[d.stage_key] || d.stage_key || 'Unknown';
+  const stageColor = STREAK_STAGE_COLORS[d.stage_key] || '#64748b';
+  const assignees = (() => { try { return JSON.parse(d.assigned_to || '[]'); } catch { return []; } })();
+  const createdDate = d.created_at ? new Date(parseInt(d.created_at)).toLocaleDateString() : '';
+  const updatedDate = d.updated_at ? new Date(parseInt(d.updated_at)).toLocaleDateString() : '';
+
+  content.innerHTML = `
+    <div class="modal-header">
+      <div class="modal-title">
+        <div class="deal-logo">🔄</div>
+        <div>
+          <h3>${d.name}</h3>
+          <div class="sub">${d.funding_stage || 'Unknown Stage'} · ${d.country || 'Unknown'} · <span style="color:${stageColor}">${stageName}</span></div>
+        </div>
+        <span class="deal-tier-badge" style="margin-left:12px;background:${stageColor}22;color:${stageColor};border:1px solid ${stageColor}44">${stageName}</span>
+      </div>
+      <button class="modal-close" id="modal-close-btn">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-section">
+        <div class="modal-section-title">Deal Details</div>
+        <div class="score-breakdown">
+          <div class="score-dim"><div class="score-dim-label">Deal Size</div><div class="score-dim-val" style="color:var(--accent-green)">${d.deal_size || '—'}</div></div>
+          <div class="score-dim"><div class="score-dim-label">Funding Stage</div><div class="score-dim-val" style="color:var(--accent-blue)">${d.funding_stage || '—'}</div></div>
+          <div class="score-dim"><div class="score-dim-label">Source</div><div class="score-dim-val">${d.source || '—'}</div></div>
+          <div class="score-dim"><div class="score-dim-label">Country</div><div class="score-dim-val">${d.country || '—'}</div></div>
+          <div class="score-dim"><div class="score-dim-label">Created</div><div class="score-dim-val">${createdDate}</div></div>
+          <div class="score-dim"><div class="score-dim-label">Last Updated</div><div class="score-dim-val">${updatedDate}</div></div>
+        </div>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-title">📧 Email Activity</div>
+        <div class="score-breakdown">
+          <div class="score-dim"><div class="score-dim-label">Total</div><div class="score-dim-val" style="color:var(--accent-blue)">${d.total_emails || 0}</div></div>
+          <div class="score-dim"><div class="score-dim-label">Sent</div><div class="score-dim-val" style="color:var(--accent-green)">${d.total_sent_emails || 0}</div></div>
+          <div class="score-dim"><div class="score-dim-label">Received</div><div class="score-dim-val" style="color:var(--accent-purple)">${d.total_received_emails || 0}</div></div>
+        </div>
+      </div>
+
+      ${assignees.length > 0 ? `
+      <div class="modal-section">
+        <div class="modal-section-title">👥 Assigned To</div>
+        <div class="founders-list">
+          ${assignees.map(a => `
+            <div class="founder-card">
+              <div class="founder-avatar">${(a.name || 'U').split(' ').map(n => n[0]).join('').substring(0, 2)}</div>
+              <div>
+                <div class="founder-name">${a.name || 'Unknown'}</div>
+                <div class="founder-pedigree">${a.email || ''}</div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>` : ''}
+
+      ${d.notes ? `
+      <div class="modal-section">
+        <div class="modal-section-title">📝 Notes</div>
+        <div class="thesis-box"><p>${d.notes}</p></div>
+      </div>` : ''}
+
+      ${d.description ? `
+      <div class="modal-section">
+        <div class="modal-section-title">📋 Description</div>
+        <div class="thesis-box"><p>${d.description}</p></div>
+      </div>` : ''}
+
+      <div class="modal-section">
+        <div class="modal-section-title">✏️ Add Note</div>
+        <textarea id="streak-note-input" placeholder="Add a note about this deal..." style="width:100%;min-height:80px;background:var(--bg-tertiary);border:1px solid var(--border-primary);border-radius:8px;color:var(--text-primary);padding:12px;font-family:Inter;font-size:0.85rem;resize:vertical"></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <select id="streak-note-type" style="background:var(--bg-tertiary);border:1px solid var(--border-primary);border-radius:8px;color:var(--text-primary);padding:6px 12px;font-size:0.8rem">
+            <option value="note">📝 Note</option>
+            <option value="meeting">🤝 Meeting</option>
+            <option value="call">📞 Call</option>
+            <option value="email">📧 Email</option>
+            <option value="task">✅ Task</option>
+          </select>
+          <button id="streak-note-save" style="padding:6px 20px;background:var(--accent-green);color:white;border:none;border-radius:8px;cursor:pointer;font-size:0.8rem;font-weight:600">Save Note</button>
+        </div>
+        <div id="deal-notes-list" style="margin-top:16px"></div>
+      </div>
+    </div>
+  `;
+
+  modal.classList.add('active');
+  content.querySelector('#modal-close-btn').addEventListener('click', closeModal);
+
+  // Save note
+  document.getElementById('streak-note-save')?.addEventListener('click', async () => {
+    const noteContent = document.getElementById('streak-note-input').value.trim();
+    const noteType = document.getElementById('streak-note-type').value;
+    if (!noteContent) return;
+    if (supabaseConnected && supabase) {
+      await supabase.from('deal_notes').insert({
+        deal_id: d.box_key,
+        author_email: currentUser?.email || 'anonymous',
+        author_name: currentUser?.name || 'Anonymous',
+        content: noteContent,
+        note_type: noteType
+      });
+      document.getElementById('streak-note-input').value = '';
+      loadDealNotes(d.box_key);
+    }
+  });
+
+  // Load existing notes
+  loadDealNotes(d.box_key);
+}
+
+async function loadDealNotes(dealId) {
+  const container = document.getElementById('deal-notes-list');
+  if (!container || !supabaseConnected || !supabase) return;
+  try {
+    const { data } = await supabase.from('deal_notes').select('*').eq('deal_id', dealId).order('created_at', { ascending: false }).limit(20);
+    if (data && data.length > 0) {
+      container.innerHTML = data.map(n => {
+        const typeIcons = { note: '📝', meeting: '🤝', call: '📞', email: '📧', task: '✅', stage_change: '🔄' };
+        return `<div style="padding:10px;background:var(--bg-tertiary);border-radius:8px;margin-bottom:8px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+            <span style="font-size:0.75rem;font-weight:600;color:var(--text-primary)">${typeIcons[n.note_type] || '📝'} ${n.author_name || n.author_email || 'Unknown'}</span>
+            <span style="font-size:0.65rem;color:var(--text-muted)">${new Date(n.created_at).toLocaleDateString()} ${new Date(n.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+          </div>
+          <div style="font-size:0.8rem;color:var(--text-secondary);line-height:1.5">${n.content}</div>
+        </div>`;
+      }).join('');
+    } else {
+      container.innerHTML = '<div style="color:var(--text-muted);font-size:0.8rem;text-align:center;padding:12px">No notes yet.</div>';
+    }
+  } catch (e) { console.warn('Notes load error:', e.message); }
+}
+
+function openAddDealModal() {
+  const modal = document.getElementById('modal-overlay');
+  const content = document.getElementById('modal-content');
+
+  content.innerHTML = `
+    <div class="modal-header">
+      <div class="modal-title"><h3>➕ Add New Deal</h3></div>
+      <button class="modal-close" id="modal-close-btn">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <label style="font-size:0.75rem;color:var(--text-muted);display:block;margin-bottom:4px">Company Name *</label>
+          <input id="new-deal-name" type="text" placeholder="e.g. FactoryOS" style="width:100%;padding:10px;background:var(--bg-tertiary);border:1px solid var(--border-primary);border-radius:8px;color:var(--text-primary);font-size:0.85rem">
+        </div>
+        <div>
+          <label style="font-size:0.75rem;color:var(--text-muted);display:block;margin-bottom:4px">Stage</label>
+          <select id="new-deal-stage" style="width:100%;padding:10px;background:var(--bg-tertiary);border:1px solid var(--border-primary);border-radius:8px;color:var(--text-primary);font-size:0.85rem">
+            <option value="5001">Lead</option>
+            <option value="5002">Met + Active</option>
+            <option value="5003" selected>Deep Dive</option>
+            <option value="5004">IC Review</option>
+            <option value="5007">Term Sheet</option>
+            <option value="5011">Portfolio</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:0.75rem;color:var(--text-muted);display:block;margin-bottom:4px">Country</label>
+          <input id="new-deal-country" type="text" placeholder="e.g. India" style="width:100%;padding:10px;background:var(--bg-tertiary);border:1px solid var(--border-primary);border-radius:8px;color:var(--text-primary);font-size:0.85rem">
+        </div>
+        <div>
+          <label style="font-size:0.75rem;color:var(--text-muted);display:block;margin-bottom:4px">Funding Stage</label>
+          <select id="new-deal-funding" style="width:100%;padding:10px;background:var(--bg-tertiary);border:1px solid var(--border-primary);border-radius:8px;color:var(--text-primary);font-size:0.85rem">
+            <option value="">Select...</option>
+            <option value="Pre-seed">Pre-seed</option>
+            <option value="Seed">Seed</option>
+            <option value="Pre-Series A">Pre-Series A</option>
+            <option value="Series A">Series A</option>
+            <option value="Series B">Series B</option>
+            <option value="Series C">Series C</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:0.75rem;color:var(--text-muted);display:block;margin-bottom:4px">Deal Size</label>
+          <input id="new-deal-size" type="text" placeholder="e.g. $5M" style="width:100%;padding:10px;background:var(--bg-tertiary);border:1px solid var(--border-primary);border-radius:8px;color:var(--text-primary);font-size:0.85rem">
+        </div>
+        <div>
+          <label style="font-size:0.75rem;color:var(--text-muted);display:block;margin-bottom:4px">Source</label>
+          <select id="new-deal-source" style="width:100%;padding:10px;background:var(--bg-tertiary);border:1px solid var(--border-primary);border-radius:8px;color:var(--text-primary);font-size:0.85rem">
+            <option value="Inbound">Inbound</option>
+            <option value="Outbound">Outbound</option>
+            <option value="Incubator / Accelerator">Incubator / Accelerator</option>
+            <option value="Banker">Banker</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-top:12px">
+        <label style="font-size:0.75rem;color:var(--text-muted);display:block;margin-bottom:4px">Notes</label>
+        <textarea id="new-deal-notes" placeholder="Deal notes..." style="width:100%;min-height:80px;background:var(--bg-tertiary);border:1px solid var(--border-primary);border-radius:8px;color:var(--text-primary);padding:12px;font-family:Inter;font-size:0.85rem;resize:vertical"></textarea>
+      </div>
+      <div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end">
+        <button id="cancel-deal-btn" style="padding:8px 20px;background:var(--bg-tertiary);color:var(--text-secondary);border:1px solid var(--border-primary);border-radius:8px;cursor:pointer;font-size:0.85rem">Cancel</button>
+        <button id="save-deal-btn" style="padding:8px 20px;background:var(--accent-green);color:white;border:none;border-radius:8px;cursor:pointer;font-size:0.85rem;font-weight:600">💾 Save Deal</button>
+      </div>
+    </div>
+  `;
+
+  modal.classList.add('active');
+  content.querySelector('#modal-close-btn').addEventListener('click', closeModal);
+  document.getElementById('cancel-deal-btn')?.addEventListener('click', closeModal);
+
+  document.getElementById('save-deal-btn')?.addEventListener('click', async () => {
+    const name = document.getElementById('new-deal-name').value.trim();
+    if (!name) { alert('Company name is required'); return; }
+
+    const newDeal = {
+      box_key: 'manual_' + Date.now(),
+      name: name,
+      stage_key: document.getElementById('new-deal-stage').value,
+      country: document.getElementById('new-deal-country').value,
+      funding_stage: document.getElementById('new-deal-funding').value,
+      deal_size: document.getElementById('new-deal-size').value,
+      source: document.getElementById('new-deal-source').value,
+      notes: document.getElementById('new-deal-notes').value,
+      assigned_to: JSON.stringify([{ name: currentUser?.name || 'Unknown', email: currentUser?.email || '' }]),
+      total_emails: 0, total_sent_emails: 0, total_received_emails: 0,
+      created_at: Date.now(), updated_at: Date.now()
+    };
+
+    if (supabaseConnected && supabase) {
+      const { error } = await supabase.from('streak_deals').insert(newDeal);
+      if (error) { console.error('Save deal error:', error); alert('Error saving deal: ' + error.message); return; }
+    }
+    streakDeals.unshift(newDeal);
+    closeModal();
+    renderCurrentSection();
   });
 }
 
@@ -2755,23 +3073,114 @@ function renderActivityLog(area) {
   });
 }
 
+
+// ---- Auth & Session Management ----
+function decodeJwt(token) {
+  try {
+    const base64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(atob(base64));
+  } catch { return null; }
+}
+
+// Google Sign-In callback (must be global)
+window.handleGoogleLogin = async function (response) {
+  const user = decodeJwt(response.credential);
+  if (!user) return;
+  currentUser = { email: user.email, name: user.name, avatar: user.picture };
+  localStorage.setItem('jv_user', JSON.stringify(currentUser));
+
+  // Save to Supabase
+  if (supabaseConnected && supabase) {
+    try {
+      await supabase.from('user_profiles').upsert({
+        email: user.email, name: user.name, avatar_url: user.picture,
+        last_login: new Date().toISOString()
+      }, { onConflict: 'email' });
+    } catch (e) { console.warn('User profile save:', e.message); }
+  }
+
+  showDashboard();
+};
+
+function showDashboard() {
+  const overlay = document.getElementById('login-overlay');
+  const app = document.getElementById('main-app');
+  if (overlay) { overlay.style.opacity = '0'; setTimeout(() => overlay.style.display = 'none', 500); }
+  if (app) app.style.display = '';
+
+  // Update sidebar with user info
+  if (currentUser) {
+    const brand = document.querySelector('.sidebar-brand');
+    if (brand) {
+      const existing = document.getElementById('user-profile-bar');
+      if (existing) existing.remove();
+      brand.insertAdjacentHTML('afterend', `
+        <div id="user-profile-bar" style="padding:8px 16px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border-primary);margin-bottom:4px">
+          <img src="${currentUser.avatar || ''}" style="width:28px;height:28px;border-radius:50%;border:2px solid var(--accent-green)" onerror="this.style.display='none'">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:0.75rem;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${currentUser.name || 'User'}</div>
+            <div style="font-size:0.6rem;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${currentUser.email || ''}</div>
+          </div>
+          <button onclick="logout()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:0.7rem" title="Sign out">↩</button>
+        </div>
+      `);
+    }
+  }
+}
+
+function logout() {
+  currentUser = null;
+  localStorage.removeItem('jv_user');
+  location.reload();
+}
+
 // ---- Boot ----
 async function boot() {
+  // Check existing session
+  try {
+    const saved = localStorage.getItem('jv_user');
+    if (saved) currentUser = JSON.parse(saved);
+  } catch { }
+
   // Each init is independently wrapped — a CDN failure won't block the app
   try { initStreak(); } catch (e) { console.warn('Streak init skipped:', e.message); }
   try { setTimeout(() => initGmail(), 1000); } catch (e) { console.warn('Gmail init skipped:', e.message); }
 
+  // Initialize Google Sign-In button on login page
+  try {
+    const gContainer = document.getElementById('google-signin-container');
+    const clientId = CONFIG.googleClientId || '';
+    if (gContainer && clientId && typeof google !== 'undefined') {
+      google.accounts.id.initialize({ client_id: clientId, callback: window.handleGoogleLogin });
+      google.accounts.id.renderButton(gContainer, { theme: 'filled_black', size: 'large', shape: 'pill', width: 300, text: 'sign_in_with' });
+    } else if (gContainer && !clientId) {
+      gContainer.innerHTML = '<p style="color:rgba(255,255,255,0.35);font-size:0.75rem;margin:8px 0">Google Sign-In not configured.<br>Set googleClientId in config.js</p>';
+    }
+  } catch (e) { console.warn('Google Sign-In init:', e.message); }
+
   // CRITICAL: init() MUST run regardless of integration status
   try {
     await init();
-    console.log('✅ Boot complete, deals:', rankedStartups.length);
+    console.log('✅ Boot complete, deals:', rankedStartups.length, 'streak:', streakDeals.length);
   } catch (e) {
     console.error('❌ Boot error:', e);
-    document.getElementById('content-area').innerHTML = '<div style="padding:40px;color:#ef4444;font-size:16px;"><h2>⚠️ App Error</h2><pre style="color:#f59e0b;white-space:pre-wrap;">' + e.message + '\n\n' + e.stack + '</pre></div>';
+    const area = document.getElementById('content-area');
+    if (area) area.innerHTML = '<div style="padding:40px;color:#ef4444;font-size:16px;"><h2>⚠️ App Error</h2><pre style="color:#f59e0b;white-space:pre-wrap;">' + e.message + '\n\n' + e.stack + '</pre></div>';
   }
+
+  // Show dashboard if already logged in
+  if (currentUser) {
+    showDashboard();
+  }
+
+  // Skip login button
+  document.getElementById('skip-login-btn')?.addEventListener('click', () => {
+    currentUser = { email: 'guest@jungleventures.com', name: 'Guest User', avatar: '' };
+    showDashboard();
+  });
 }
 
-// Self-boot: fire immediately since all deps loaded synchronously before this
+// Self-boot
 (async function () {
   if (typeof window._booted !== 'undefined' && window._booted) return;
   window._booted = true;
