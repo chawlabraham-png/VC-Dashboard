@@ -19,7 +19,7 @@ let streakDeals = [];  // Real Streak CRM deals
 let currentSection = 'dealflow';
 let filters = { geo: 'All', sector: 'All', tier: 'All', search: '' };
 let uploadedDecks = [];
-let currentUser = null;  // Gmail auth user
+let currentUser = { email: 'guest@jungleventures.com', name: 'Guest User', avatar: '' };
 let pipelineTab = 'all'; // 'all', 'streak', 'scored'
 
 // ---- Supabase ----
@@ -56,11 +56,17 @@ async function initSupabase() {
       integrationState.supabase.connected = true;
       console.log('✅ Supabase connected:', SUPABASE_URL);
 
-      // Fetch scored startups from Supabase
-      const { data, error } = await supabase.from('startups').select('*');
-      if (error) throw error;
+      let startupsData = null;
+      // Fetch scored startups from Supabase (may not exist yet, that's okay)
+      try {
+        const { data, error } = await supabase.from('startups').select('*');
+        if (!error && data && data.length > 0) {
+          startupsData = data;
+          console.log(`✅ Loaded ${data.length} scored deals from Supabase`);
+        }
+      } catch (e) { /* ignore to load local fallback */ }
 
-      // Also fetch real Streak CRM deals
+      // Fetch real Streak CRM deals
       try {
         const { data: sDeals, error: sErr } = await supabase
           .from('streak_deals')
@@ -77,10 +83,7 @@ async function initSupabase() {
         console.warn('Streak deals fetch skipped:', e2.message);
       }
 
-      if (data && data.length > 0) {
-        console.log(`✅ Loaded ${data.length} scored deals from Supabase`);
-        return data;
-      }
+      return startupsData;
     }
   } catch (e) {
     console.warn('Supabase init/fetch failed, falling back to local data:', e);
@@ -1529,11 +1532,67 @@ function renderPatterns(area) {
 // ============================================================
 // MODULE 7: Daily Intelligence Briefing
 // ============================================================
-function renderBriefing(area) {
+// MODULE 7: Daily Intelligence Briefing
+// ============================================================
+async function renderBriefing(area) {
+  // Show loading state
+  area.innerHTML = `
+    <div style="padding:60px 20px; text-align:center; color:var(--text-secondary)">
+      <div style="font-size:3rem; margin-bottom:16px; animation: pulse 2s infinite">🗞️</div>
+      <h3 style="font-family:Inter; font-weight:600; font-size:1.2rem; color:var(--text-primary); margin-bottom:8px">Compiling Today's Intelligence...</h3>
+      <p style="font-size:0.9rem">Fetching signals, funding rounds, and ecosystem news</p>
+    </div>
+  `;
+
+  let latestBriefing = null;
+
+  // Try fetching from Supabase
+  if (supabaseConnected) {
+    try {
+      const { data, error } = await supabase
+        .from('daily_briefings')
+        .select('*')
+        .order('date', { ascending: false })
+        .limit(1);
+
+      if (!error && data && data.length > 0) {
+        latestBriefing = data[0];
+      }
+    } catch (e) {
+      console.warn('Failed to fetch daily briefing from Supabase:', e);
+    }
+  }
+
   const top5 = rankedStartups.slice(0, 5);
   const now = new Date();
   const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
+  // If we have an AI-generated briefing from the database
+  if (latestBriefing) {
+    const briefDate = new Date(latestBriefing.date).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    const sources = latestBriefing.sources ? JSON.parse(latestBriefing.sources) : [];
+
+    // Simple markdown parser for the AI output
+    let md = latestBriefing.summary_markdown;
+    md = md.replace(/### (.*?)\n/g, '<div class="briefing-section-header" style="margin-top:24px"><span class="briefing-section-title">$1</span></div>');
+    md = md.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    md = md.replace(/- (.*?)\n/g, '<div class="briefing-item animated-item" style="padding:12px 16px; margin-bottom:8px"><div class="briefing-item-body" style="margin-top:0">• $1</div></div>');
+    md = md.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" style="color:var(--accent-blue);text-decoration:none">$1</a>');
+    md = md.replace(/\n/g, ''); // Clean remaining newlines to prevent weird gaps
+
+    area.innerHTML = `
+      <div class="briefing-container">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 24px;">
+          <div class="briefing-date">📅 ${briefDate} · Auto-generated via AI</div>
+          <div style="font-size:0.75rem; color:var(--text-tertiary)">Sources: ${sources.join(', ') || 'Various'}</div>
+        </div>
+        ${md}
+      </div>
+    `;
+    return;
+  }
+
+  // Fallback to static demo content if no DB record found
   area.innerHTML = `
     <div class="briefing-container">
       <div class="briefing-date">📅 ${dateStr} · 5 min read</div>
@@ -1583,28 +1642,6 @@ function renderBriefing(area) {
         <div class="briefing-item contrarian animated-item">
           <div class="briefing-item-title">Everyone's chasing AI SaaS — the real alpha is in hardware-software combos</div>
           <div class="briefing-item-body">While VCs pile into pure software plays, RoboWeld and PackBot combine hardware + AI software at 70% gross margins. Hardware creates lock-in that software alone can't achieve. Chinese competitors can't replicate the local field service network. This is the Fanuc/Keyence playbook, not the Salesforce one. JV should double down here while others look away.</div>
-        </div>
-      </div>
-
-      <div class="briefing-section">
-        <div class="briefing-section-header">
-          <span class="briefing-section-emoji">🚨</span>
-          <span class="briefing-section-title">1 Portfolio Alert</span>
-        </div>
-        <div class="briefing-item alert animated-item">
-          <div class="briefing-item-title">⚠️ KartBee — Competitor QuickBasket raised $22M Series A</div>
-          <div class="briefing-item-body">Direct competitor in Tier-2 quick commerce just closed $22M from Tiger Global. KartBee has 14 months runway but needs to accelerate expansion to defend territory. <strong>Recommendation:</strong> Schedule emergency board call to discuss accelerated fundraise timeline and potential bridge from existing investors.</div>
-        </div>
-      </div>
-
-      <div class="briefing-section">
-        <div class="briefing-section-header">
-          <span class="briefing-section-emoji">🌶️</span>
-          <span class="briefing-section-title">1 Spicy Ecosystem Update</span>
-        </div>
-        <div class="briefing-item spicy animated-item">
-          <div class="briefing-item-title">Sequoia's $2.8B mega-fund is about to reshape SEA deal dynamics</div>
-          <div class="briefing-item-body">Sources indicate Sequoia India/SEA is deploying aggressively into manufacturing-tech — the exact same thesis as JV. Two of their scouts have already reached out to FactoryOS and QualityLens for "coffee chats." <strong>This is both validation and threat.</strong> JV should lock pro-rata rights immediately and consider preemptive term sheets for highest-conviction names. The window to lead rounds cheaply is closing fast. 🔥</div>
         </div>
       </div>
     </div>
@@ -3158,6 +3195,12 @@ async function boot() {
     }
   } catch (e) { console.warn('Google Sign-In init:', e.message); }
 
+  // Skip login button (Bind early so it's instantly clickable)
+  document.getElementById('skip-login-btn')?.addEventListener('click', () => {
+    currentUser = { email: 'guest@jungleventures.com', name: 'Guest User', avatar: '' };
+    showDashboard();
+  });
+
   // CRITICAL: init() MUST run regardless of integration status
   try {
     await init();
@@ -3172,12 +3215,6 @@ async function boot() {
   if (currentUser) {
     showDashboard();
   }
-
-  // Skip login button
-  document.getElementById('skip-login-btn')?.addEventListener('click', () => {
-    currentUser = { email: 'guest@jungleventures.com', name: 'Guest User', avatar: '' };
-    showDashboard();
-  });
 }
 
 // Self-boot
