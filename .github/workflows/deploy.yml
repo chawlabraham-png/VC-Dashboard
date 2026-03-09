@@ -71,7 +71,7 @@ jobs:
                  --ftp-create-dirs \
                  -u "${FTP_USER}:${FTP_PASS}" \
                  -T "$file" \
-                 "ftp://${HOST}/public_html/${file}"
+                 "ftp://${HOST}/${file}"
             echo "✅ $file"
           }
           upload index.html
