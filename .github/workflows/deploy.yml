@@ -43,19 +43,20 @@ jobs:
           grep -E '\?v=' index.html
 
       - name: Deploy to Hostinger via FTP
-        uses: SamKirkland/FTP-Deploy-Action@4.3.4
-        with:
-          server: ${{ secrets.FTP_SERVER }}
-          username: ${{ secrets.FTP_USERNAME }}
-          password: ${{ secrets.FTP_PASSWORD }}
-          server-dir: /public_html/
-          # Exclude files that should never be deployed
-          exclude: |
-            **/.git*
-            **/.git*/**
-            **/node_modules/**
-            **/.netlify/**
-            **/CLAUDE_HANDOFF.md
-            **/schema.sql
-            **/README.md
-            **/config.template.js
+        run: |
+          sudo apt-get install -y lftp
+          lftp -c "
+            set ftp:ssl-allow no;
+            set net:timeout 30;
+            set net:max-retries 3;
+            open -u '${{ secrets.FTP_USERNAME }}','${{ secrets.FTP_PASSWORD }}' '${{ secrets.FTP_SERVER }}';
+            mirror --reverse --verbose \
+              --exclude-glob .git \
+              --exclude-glob .github \
+              --exclude-glob .netlify \
+              --exclude-glob CLAUDE_HANDOFF.md \
+              --exclude-glob schema.sql \
+              --exclude-glob README.md \
+              --exclude-glob config.template.js \
+              . /public_html/;
+          "
