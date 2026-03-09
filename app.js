@@ -83,6 +83,41 @@ async function initSupabase() {
         console.warn('Streak deals fetch skipped:', e2.message);
       }
 
+      // Fetch news signals (for Power Moves, Briefing, and per-module intel strips)
+      try {
+        const { data: newsData, error: newsErr } = await supabaseClient
+          .from('news_signals')
+          .select('*')
+          .order('published_at', { ascending: false })
+          .limit(100);
+        if (!newsErr && newsData) {
+          window._newsSignals = newsData;
+          console.log(`✅ Loaded ${newsData.length} news signals`);
+        } else {
+          window._newsSignals = [];
+        }
+      } catch (e3) {
+        window._newsSignals = [];
+        console.warn('news_signals fetch skipped:', e3.message);
+      }
+
+      // Fetch deal enrichments (GPT research for all 801 deals)
+      try {
+        const { data: enrichData, error: enrichErr } = await supabaseClient
+          .from('deal_enrichments')
+          .select('box_key,founder_name,founder_background,thesis_fit_score,thesis_fit_reason,strengths,risks,competitors,moat,market_size,total_raised,investors,product_description,website,founded_year');
+        if (!enrichErr && enrichData && enrichData.length > 0) {
+          window._dealEnrichments = {};
+          enrichData.forEach(e => { window._dealEnrichments[e.box_key] = e; });
+          console.log(`✅ Loaded ${enrichData.length} deal enrichments`);
+        } else {
+          window._dealEnrichments = {};
+        }
+      } catch (e4) {
+        window._dealEnrichments = {};
+        console.warn('deal_enrichments fetch skipped:', e4.message);
+      }
+
       return startupsData;
     }
   } catch (e) {
@@ -590,6 +625,50 @@ function formatLastContact(ts) {
   return { text: `${Math.floor(days/30)}mo ago`, color };
 }
 
+// ---- News Intelligence Strip (used across all modules) ----
+function getModuleNews(moduleName, limit) {
+  limit = limit || 4;
+  const signals = window._newsSignals || [];
+  if (!signals.length) return '';
+  const relevant = signals
+    .filter(n => {
+      try {
+        const mods = Array.isArray(n.modules) ? n.modules : JSON.parse(n.modules || '[]');
+        return mods.includes(moduleName);
+      } catch { return false; }
+    })
+    .slice(0, limit);
+  if (!relevant.length) return '';
+  const typeColors = {
+    'funding_round': '#10b981', 'fund_launch': '#8b5cf6', 'partner_move': '#3b82f6',
+    'acquisition': '#f59e0b', 'market_signal': '#ec4899', 'regulatory': '#ef4444',
+    'portfolio_signal': '#10b981', 'competitive_signal': '#f97316', 'general': '#64748b'
+  };
+  return `
+    <div style="margin-bottom:20px;border:1px solid rgba(255,255,255,0.07);border-radius:12px;overflow:hidden">
+      <div style="padding:10px 16px;background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.05);display:flex;align-items:center;gap:8px">
+        <span style="font-size:0.75rem;font-weight:600;color:var(--text-muted);letter-spacing:0.05em">📡 LATEST INTEL</span>
+        <span style="font-size:0.65rem;color:var(--text-muted);margin-left:auto">via n8n · auto-updated daily</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:0">
+        ${relevant.map(n => {
+          const color = typeColors[n.type] || '#64748b';
+          const pubDate = n.published_at ? new Date(n.published_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+          return `
+          <div style="padding:12px 16px;border-right:1px solid rgba(255,255,255,0.04);border-bottom:1px solid rgba(255,255,255,0.04)">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+              <span style="font-size:0.6rem;padding:1px 6px;border-radius:6px;background:${color}20;color:${color};font-weight:600;white-space:nowrap">${(n.type || 'news').replace(/_/g,' ').toUpperCase()}</span>
+              <span style="font-size:0.6rem;color:var(--text-muted);margin-left:auto">${pubDate}</span>
+            </div>
+            <div style="font-size:0.78rem;font-weight:600;color:var(--text-primary);line-height:1.3;margin-bottom:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${n.title || ''}</div>
+            <div style="font-size:0.7rem;color:var(--text-secondary);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${n.implication || n.ai_summary || ''}</div>
+            ${n.source_url ? `<a href="${n.source_url}" target="_blank" style="font-size:0.65rem;color:var(--accent-blue);text-decoration:none;margin-top:4px;display:block">${n.source || 'Read more'} →</a>` : `<span style="font-size:0.65rem;color:var(--text-muted)">${n.source || ''}</span>`}
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+}
+
 function renderDealFlow(area) {
   // Score and annotate all streak deals
   let filtered = streakDeals.map(d => ({
@@ -623,6 +702,7 @@ function renderDealFlow(area) {
   const avgScore = filtered.length ? Math.round(filtered.reduce((s, d) => s + d._score, 0) / filtered.length) : 0;
 
   area.innerHTML = `
+    ${getModuleNews('dealflow', 3)}
     <div class="stats-bar">
       <div class="stat-card">
         <div class="stat-label">Total Deals</div>
@@ -1457,6 +1537,7 @@ function renderValuation(area) {
 // ============================================================
 function renderThesis(area) {
   area.innerHTML = `
+    ${getModuleNews('thesis', 6)}
     <div class="insight-box positive">
       <span class="insight-emoji">🧭</span>
       <strong>Your thesis is getting stronger in:</strong> AI-Powered Manufacturing, Sustainable Manufacturing, Affordable Industrial Robotics. Capital is flowing into factory-tech at unprecedented rates.
@@ -1529,68 +1610,112 @@ function renderThesis(area) {
 // MODULE 4: Portfolio Command Center
 // ============================================================
 function renderPortfolio(area) {
-  const greenCount = PORTFOLIO_DATA.filter(p => p.health === 'green').length;
-  const followOnReady = PORTFOLIO_DATA.filter(p => p.followOnReady).length;
+  const now = Date.now();
+
+  function getHealth(d) {
+    const last = d.last_email_timestamp ? parseInt(d.last_email_timestamp) : null;
+    if (!last) return 'yellow';
+    const days = (now - last) / 86400000;
+    return days < 30 ? 'green' : days < 90 ? 'yellow' : 'red';
+  }
+
+  function getDaysSince(d) {
+    const ts = d.last_email_timestamp ? parseInt(d.last_email_timestamp) :
+               d.updated_at ? parseInt(d.updated_at) : null;
+    if (!ts) return 999;
+    return Math.floor((now - ts) / 86400000);
+  }
+
+  if (!streakDeals.length) {
+    area.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-secondary)">Loading portfolio data from Streak CRM...</div>';
+    return;
+  }
+
+  const portfolio = streakDeals.filter(d => d.stage_key === '5014');
+  const watching = streakDeals.filter(d => ['5008', '5015'].includes(d.stage_key));
+
+  if (!portfolio.length) {
+    area.innerHTML = `
+      ${getModuleNews('portfolio')}
+      <div class="stats-bar">
+        <div class="stat-card"><div class="stat-label">Portfolio Companies</div><div class="stat-value emerald">0</div></div>
+        <div class="stat-card"><div class="stat-label">Watching</div><div class="stat-value blue">${watching.length}</div></div>
+      </div>
+      <div style="padding:60px;text-align:center;color:var(--text-secondary)">
+        <div style="font-size:3rem;margin-bottom:16px">📊</div>
+        <h3 style="color:var(--text-primary)">No portfolio companies yet</h3>
+        <p>Companies moved to the "Portfolio" stage (5014) in Streak will appear here automatically.</p>
+      </div>`;
+    return;
+  }
+
+  const greenCount = portfolio.filter(p => getHealth(p) === 'green').length;
+  const alerts = portfolio.filter(p => getHealth(p) !== 'green').length;
+  const totalEmails = portfolio.reduce((a, p) => a + (p.total_sent_emails || 0) + (p.total_received_emails || 0), 0);
 
   area.innerHTML = `
+    ${getModuleNews('portfolio')}
     <div class="stats-bar">
-      <div class="stat-card">
-        <div class="stat-label">Portfolio Companies</div>
-        <div class="stat-value emerald">${PORTFOLIO_DATA.length}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Health: Green</div>
-        <div class="stat-value emerald">${greenCount}</div>
-        <div class="stat-change positive">✅ On track</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Follow-on Ready</div>
-        <div class="stat-value blue">${followOnReady}</div>
-        <div class="stat-change positive">Pro-rata opportunity</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Alerts</div>
-        <div class="stat-value orange">${PORTFOLIO_DATA.filter(p => p.health !== 'green').length}</div>
-        <div class="stat-change negative">Needs attention</div>
-      </div>
+      <div class="stat-card"><div class="stat-label">Portfolio Companies</div><div class="stat-value emerald">${portfolio.length}</div></div>
+      <div class="stat-card"><div class="stat-label">Active (last 30d)</div><div class="stat-value emerald">${greenCount}</div><div class="stat-change positive">✅ Engaged</div></div>
+      <div class="stat-card"><div class="stat-label">Total Emails</div><div class="stat-value blue">${totalEmails}</div><div class="stat-change positive">All-time interactions</div></div>
+      <div class="stat-card"><div class="stat-label">Needs Attention</div><div class="stat-value orange">${alerts}</div><div class="stat-change ${alerts ? 'negative' : 'positive'}">${alerts ? 'No recent contact' : 'All active ✅'}</div></div>
     </div>
 
     <div class="section-title-row">
-      <div class="section-title">📊 Weekly Partner Update</div>
-      <div class="section-subtitle">Auto-generated ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>
+      <div class="section-title">📊 Portfolio Companies</div>
+      <div class="section-subtitle">Live from Streak CRM · ${portfolio.length} companies · Auto-updated</div>
     </div>
 
     <div class="portfolio-grid">
-      ${PORTFOLIO_DATA.map((p, i) => `
-        <div class="portfolio-card animated-item">
-          <div class="portfolio-logo">${p.logo}</div>
-          <div>
-            <div class="portfolio-info-name">${p.name}</div>
-            <div class="portfolio-info-sub">${p.stage}</div>
-          </div>
-          <div class="portfolio-metric">
-            <div class="portfolio-metric-value" style="color:var(--accent-blue)">${p.hiring}</div>
-            <div class="portfolio-metric-label">Hiring</div>
-          </div>
-          <div class="portfolio-metric">
-            <div class="portfolio-metric-value" style="color:var(--accent-emerald)">${p.traffic}</div>
-            <div class="portfolio-metric-label">Traffic</div>
-          </div>
-          <div class="portfolio-metric">
-            <div class="portfolio-metric-value" style="color:var(--accent-purple)">${p.appRank}</div>
-            <div class="portfolio-metric-label">App Rank</div>
-          </div>
-          <div style="display:flex;flex-direction:column;gap:6px;min-width:240px">
-            <div style="display:flex;align-items:center;gap:8px">
-              <span class="health-indicator ${p.health}">${p.health === 'green' ? '● Healthy' : p.health === 'yellow' ? '● Caution' : '● Alert'}</span>
-              ${p.followOnReady ? '<span class="health-indicator green">↑ Follow-on Ready</span>' : ''}
+      ${portfolio.map(p => {
+        const health = getHealth(p);
+        const industry = p._industry || inferIndustry(p);
+        const country = p._country || inferCountry(p);
+        const days = getDaysSince(p);
+        const score = p._score !== undefined ? p._score : scoreStreakDeal(p);
+        const scoreColor = score >= 70 ? '#10b981' : score >= 45 ? '#f59e0b' : '#ef4444';
+        const enrich = (window._dealEnrichments || {})[p.box_key] || {};
+        const assignees = (() => { try { return JSON.parse(p.assigned_to || '[]'); } catch { return []; } })();
+        const name = (p.name || '').replace(/^www\./, '').replace(/\.(com|co\.in|co|in|io|ai|vc|org|net)(\/.*)?$/i, '');
+        return `
+          <div class="portfolio-card animated-item" style="cursor:pointer" onclick="openStreakDealModal(${JSON.stringify(p).replace(/"/g, '&quot;')})">
+            <div class="portfolio-logo" style="font-size:1.4rem">${industry.slice(0,2)}</div>
+            <div>
+              <div class="portfolio-info-name">${name}</div>
+              <div class="portfolio-info-sub">${p.funding_stage || industry} · ${country}</div>
             </div>
-            <div style="font-size:0.72rem;color:var(--text-tertiary)">Sentiment: ${p.sentiment} | Competitor: ${p.compFunding}</div>
-            ${p.signals.map(sig => `<div style="font-size:0.75rem;color:${sig.startsWith('⚠️') ? 'var(--accent-amber)' : 'var(--text-secondary)'};line-height:1.4">• ${sig}</div>`).join('')}
-          </div>
-        </div>
-      `).join('')}
+            <div class="portfolio-metric">
+              <div class="portfolio-metric-value" style="color:${scoreColor}">${score}</div>
+              <div class="portfolio-metric-label">VC Score</div>
+            </div>
+            <div class="portfolio-metric">
+              <div class="portfolio-metric-value" style="color:var(--accent-emerald)">↑${p.total_sent_emails || 0} ↓${p.total_received_emails || 0}</div>
+              <div class="portfolio-metric-label">Emails S/R</div>
+            </div>
+            <div class="portfolio-metric">
+              <div class="portfolio-metric-value" style="color:${days < 30 ? 'var(--accent-green)' : days < 90 ? 'var(--accent-orange)' : '#ef4444'}">${days < 999 ? days + 'd' : '—'}</div>
+              <div class="portfolio-metric-label">Days Since</div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:6px;min-width:200px">
+              <div style="display:flex;align-items:center;gap:8px">
+                <span class="health-indicator ${health}">${health === 'green' ? '● Active' : health === 'yellow' ? '● Quiet' : '● Stale'}</span>
+                ${enrich.thesis_fit_score ? `<span style="font-size:0.65rem;padding:1px 6px;border-radius:6px;background:var(--accent-purple)15;color:var(--accent-purple)">Fit: ${enrich.thesis_fit_score}/100</span>` : ''}
+              </div>
+              ${enrich.founder_name ? `<div style="font-size:0.7rem;color:var(--text-muted)">👤 ${enrich.founder_name}</div>` : ''}
+              ${(enrich.strengths || []).slice(0,1).map(s => `<div style="font-size:0.72rem;color:var(--accent-green);line-height:1.4">✓ ${s}</div>`).join('')}
+              ${(enrich.risks || []).slice(0,1).map(r => `<div style="font-size:0.72rem;color:var(--accent-orange);line-height:1.4">⚠ ${r}</div>`).join('')}
+              ${assignees.length ? `<div style="font-size:0.68rem;color:var(--text-muted)">👤 ${assignees.map(a => a.name || a.email || a).join(', ')}</div>` : ''}
+            </div>
+          </div>`;
+      }).join('')}
     </div>
+    ${watching.length ? `
+    <div class="section-title-row" style="margin-top:32px">
+      <div class="section-title">👀 Watching / Too Early</div>
+      <div class="section-subtitle">${watching.length} companies in tracking stages</div>
+    </div>
+    <div class="deal-grid">${watching.map(d => renderStreakDealCard(d)).join('')}</div>` : ''}
   `;
 }
 
@@ -1598,27 +1723,110 @@ function renderPortfolio(area) {
 // MODULE 5: Power Moves & Gossip
 // ============================================================
 function renderPowerMoves(area) {
+  const now = Date.now();
+  const signals = window._newsSignals || [];
+
+  // Filter news relevant to power moves + derive from streak activity as fallback
+  const typeColors = {
+    'fund_launch': 'var(--accent-purple)', 'partner_move': 'var(--accent-blue)',
+    'funding_round': 'var(--accent-green)', 'acquisition': 'var(--accent-orange)',
+    'market_signal': 'var(--accent-pink)', 'competitive_signal': '#f97316',
+    'regulatory': '#ef4444', 'portfolio_signal': '#10b981', 'general': '#64748b',
+    'Urgent Deal': '#ef4444', 'IC Candidate': '#10b981', 'Deal Activity': '#64748b'
+  };
+
+  let powerItems = signals
+    .filter(n => {
+      try {
+        const mods = Array.isArray(n.modules) ? n.modules : JSON.parse(n.modules || '[]');
+        return mods.includes('powermoves') || n.type === 'fund_launch' || n.type === 'partner_move' || n.type === 'competitive_signal';
+      } catch { return false; }
+    })
+    .slice(0, 20)
+    .map(n => ({
+      type: (n.type || 'general').replace(/_/g, ' '),
+      title: n.company ? `${n.company}: ${n.title}` : n.title,
+      desc: n.summary || n.ai_summary || '',
+      implication: n.implication || '',
+      time: n.published_at ? new Date(n.published_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '',
+      source: n.source || '',
+      url: n.source_url || null,
+      rawType: n.type
+    }));
+
+  // If no news signals yet, derive signals from streak deals activity
+  if (!powerItems.length && streakDeals.length) {
+    const urgent = streakDeals.filter(d => d.stage_key === '5007');
+    const icCandidates = streakDeals.filter(d => d.stage_key === '5011');
+    const recentActive = streakDeals
+      .filter(d => d.last_email_timestamp && (now - parseInt(d.last_email_timestamp)) < 14 * 86400000)
+      .sort((a, b) => parseInt(b.last_email_timestamp) - parseInt(a.last_email_timestamp))
+      .slice(0, 12);
+
+    urgent.forEach(d => {
+      const name = (d.name || '').replace(/\.(com|co\.in|io|ai|net|org)(\/.*)?$/i, '');
+      powerItems.push({
+        type: 'Urgent Deal', rawType: 'Urgent Deal',
+        title: `${name} — Urgent Tracking`,
+        desc: d.description ? d.description.substring(0, 200) : 'Marked urgent in Streak CRM.',
+        implication: `🚨 Immediate follow-up required. ${d.total_sent_emails || 0} emails sent, ${d.total_received_emails || 0} received.`,
+        time: formatLastContact(d.last_email_timestamp).text
+      });
+    });
+
+    icCandidates.slice(0, 5).forEach(d => {
+      const name = (d.name || '').replace(/\.(com|co\.in|io|ai|net|org)(\/.*)?$/i, '');
+      powerItems.push({
+        type: 'IC Candidate', rawType: 'IC Candidate',
+        title: `${name} — IC Process Active`,
+        desc: d.description ? d.description.substring(0, 200) : 'In IC review stage.',
+        implication: `💼 Investment committee evaluation underway. ${(d.total_sent_emails || 0) + (d.total_received_emails || 0)} total email interactions.`,
+        time: formatLastContact(d.last_email_timestamp).text
+      });
+    });
+
+    recentActive.filter(d => !['5007','5011'].includes(d.stage_key)).slice(0, 8).forEach(d => {
+      const name = (d.name || '').replace(/\.(com|co\.in|io|ai|net|org)(\/.*)?$/i, '');
+      const stageName = STREAK_STAGE_NAMES[d.stage_key] || d.stage_key;
+      powerItems.push({
+        type: 'Deal Activity', rawType: 'Deal Activity',
+        title: `${name} — Active at ${stageName}`,
+        desc: d.description ? d.description.substring(0, 200) : `Stage: ${stageName}.`,
+        implication: `📧 ${d.total_sent_emails || 0} sent, ${d.total_received_emails || 0} received.`,
+        time: formatLastContact(d.last_email_timestamp).text
+      });
+    });
+  }
+
   area.innerHTML = `
     <div class="insight-box info">
       <span class="insight-emoji">🕵️</span>
-      <strong>Intelligence Summary:</strong> Sequoia's mega-fund will inflate manufacturing-tech valuations. Two stealth competitors raising in your portfolio's space. One key partner movement creates co-investment opportunity.
+      <strong>Intelligence Feed:</strong> ${powerItems.length} signals from ${signals.length ? 'news monitoring + Streak CRM' : 'Streak CRM deal activity'}. ${signals.length ? 'Auto-updated daily via n8n.' : 'Add n8n news workflow for external signals (ET, VCCircle, Inc42).'}
     </div>
 
     <div class="section-title-row" style="margin-top:20px">
       <div class="section-title">Network Intelligence Feed</div>
-      <div class="section-subtitle">Signals that move markets</div>
+      <div class="section-subtitle">${signals.length ? `${signals.length} news signals · Updated ${new Date().toLocaleDateString()}` : 'Live · Streak CRM deal activity'}</div>
     </div>
 
     <div class="power-timeline">
-      ${POWER_MOVES.map((pm, i) => `
+      ${powerItems.length ? powerItems.map(pm => `
         <div class="power-event animated-item">
-          <div class="power-event-type">${pm.type}</div>
+          <div class="power-event-type" style="color:${typeColors[pm.rawType] || typeColors[pm.type] || 'var(--accent-blue)'}">${pm.type}</div>
           <div class="power-event-title">${pm.title}</div>
           <div class="power-event-desc">${pm.desc}</div>
           <div class="power-event-implication">${pm.implication}</div>
-          <div class="power-event-time">${pm.time}</div>
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div class="power-event-time">${pm.time}</div>
+            ${pm.url ? `<a href="${pm.url}" target="_blank" style="font-size:0.65rem;color:var(--accent-blue);text-decoration:none">${pm.source || 'Read'} →</a>` : pm.source ? `<span class="power-event-time">${pm.source}</span>` : ''}
+          </div>
         </div>
-      `).join('')}
+      `).join('') : `
+        <div style="padding:60px;text-align:center;color:var(--text-secondary)">
+          <div style="font-size:3rem;margin-bottom:16px">📡</div>
+          <h3 style="color:var(--text-primary)">Power Moves Intelligence</h3>
+          <p>Import the n8n_news_workflow.json into your n8n instance to start receiving daily VC intelligence signals from Economic Times, VCCircle, Inc42, and more.</p>
+        </div>`}
     </div>
   `;
 }
@@ -1628,6 +1836,7 @@ function renderPowerMoves(area) {
 // ============================================================
 function renderPatterns(area) {
   area.innerHTML = `
+    ${getModuleNews('patterns', 4)}
     <div class="insight-box positive">
       <span class="insight-emoji">🧬</span>
       <strong>Pattern Insight:</strong> In JV's portfolio, 100% of companies with composite score >75 have founders with prior exits AND regulatory tailwinds. Speed of execution (MVP <90 days) correlates with 3x Series A success rate.
@@ -2276,40 +2485,95 @@ ${s.founders.map(f => `- **${f.name}** (${f.role}) — ${f.pedigree}`).join('\n'
   });
 }
 
-// ---- Fundraising Radar Data ----
-const FUNDRAISING_SIGNALS = [
-  { company: 'QuickDeliver', signal: 'Hired VP Finance + 3 FP&A roles — typical pre-raise signal', confidence: 'High', estStage: 'Series A', estSize: '$8-12M', date: '2 days ago', icon: '👥' },
-  { company: 'FactoryOS', signal: 'CEO spoke at YC Demo Day networking event', confidence: 'High', estStage: 'Series A', estSize: '$10-15M', date: '3 days ago', icon: '🎤' },
-  { company: 'PlaySEA', signal: 'Office expansion from 2K to 8K sqft in Singapore', confidence: 'Medium', estStage: 'Series A', estSize: '$6-10M', date: '5 days ago', icon: '🏢' },
-  { company: 'ChainFlow', signal: 'New "Investor Relations" page added to website', confidence: 'Medium', estStage: 'Series A', estSize: '$5-8M', date: '1 week ago', icon: '🌐' },
-  { company: 'EyeQuality', signal: 'Board meeting cadence increased to bi-weekly', confidence: 'Medium', estStage: 'Series B', estSize: '$20-30M', date: '1 week ago', icon: '📅' },
-  { company: 'LendAPI', signal: 'Bloomberg interview discussing "next phase of growth"', confidence: 'Medium', estStage: 'Series A', estSize: '$8-12M', date: '10 days ago', icon: '📰' },
-  { company: 'TokTok Bharat', signal: 'Hired Goldman Sachs associate as Chief of Staff', confidence: 'High', estStage: 'Series A', estSize: '$15-20M', date: '12 days ago', icon: '👔' },
-  { company: 'RoboAssembly', signal: 'Patent filings accelerated — 4 new patents in 2 months', confidence: 'Low', estStage: 'Series A', estSize: '$5-8M', date: '2 weeks ago', icon: '📜' },
-  { company: 'GreenMill', signal: 'Partnership announcement with Temasek-linked accelerator', confidence: 'Medium', estStage: 'Series A', estSize: '$8-12M', date: '2 weeks ago', icon: '🤝' },
-  { company: 'SaveStack', signal: 'Multiple Glassdoor reviews mention "exciting fundraise"', confidence: 'Low', estStage: 'Seed+', estSize: '$3-5M', date: '3 weeks ago', icon: '💬' }
-];
-
 function renderFundRadar(area) {
+  if (!streakDeals.length) {
+    area.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-secondary)">Loading fundraising signals from Streak CRM...</div>';
+    return;
+  }
+
   const confColors = { High: 'var(--accent-green)', Medium: 'var(--accent-orange)', Low: 'var(--text-muted)' };
   const confBg = { High: 'rgba(16,185,129,0.1)', Medium: 'rgba(245,158,11,0.1)', Low: 'rgba(148,163,184,0.1)' };
+  const HIGH_STAGES = new Set(['5003', '5011', '5004', '5007']);
+  const MED_STAGES  = new Set(['5002', '5018']);
+  const ACTIVE      = new Set(['5001','5016','5018','5002','5003','5011','5004','5007','5008','5015']);
+  const now = Date.now();
+
+  function getDaysSince(d) {
+    const ts = d.last_email_timestamp ? parseInt(d.last_email_timestamp) :
+               d.updated_at ? parseInt(d.updated_at) : null;
+    if (!ts) return 999;
+    return Math.floor((now - ts) / 86400000);
+  }
+  function getTimeLabel(days) {
+    if (days === 0) return 'Today'; if (days === 1) return '1 day ago';
+    if (days < 7) return `${days} days ago`; if (days < 14) return '1 week ago';
+    if (days < 30) return `${Math.floor(days/7)} weeks ago`;
+    return `${Math.floor(days/30)} months ago`;
+  }
+  function getConf(d) {
+    return HIGH_STAGES.has(d.stage_key) ? 'High' : MED_STAGES.has(d.stage_key) ? 'Medium' : 'Low';
+  }
+  function getSignalText(d) {
+    const emails = (d.total_sent_emails || 0) + (d.total_received_emails || 0);
+    const stage = STREAK_STAGE_NAMES[d.stage_key] || 'Active';
+    if (d.stage_key === '5007') return `Urgent tracking — ${emails} email interactions, actively monitored`;
+    if (d.stage_key === '5011') return `IC process initiated — ${emails} emails exchanged`;
+    if (d.stage_key === '5003') return `Deep dive in progress — ${emails} emails, strong engagement`;
+    if (d.stage_key === '5004') return `Term sheet stage — ${emails} total interactions`;
+    if (d.stage_key === '5002') return `Met & active — ${emails} email interactions`;
+    return `${stage} — ${emails} total interactions`;
+  }
+
+  const signals = streakDeals
+    .filter(d => ACTIVE.has(d.stage_key) && getDaysSince(d) < 90)
+    .sort((a, b) => getDaysSince(a) - getDaysSince(b))
+    .slice(0, 30)
+    .map(d => ({
+      d,
+      company: (d.name || '').replace(/^www\./, '').replace(/\.(com|co\.in|io|ai|net|org)(\/.*)?$/i, ''),
+      signal: getSignalText(d),
+      confidence: getConf(d),
+      estStage: d.funding_stage || STREAK_STAGE_NAMES[d.stage_key] || 'Unknown',
+      estSize: d.deal_size || '—',
+      date: getTimeLabel(getDaysSince(d)),
+      icon: d.stage_key === '5007' ? '🚨' : d.stage_key === '5011' ? '✅' : d.stage_key === '5003' ? '🔍' : '📡',
+      country: d._country || inferCountry(d)
+    }));
 
   const geoHeat = {};
-  rankedStartups.forEach(s => { geoHeat[s.geography] = (geoHeat[s.geography] || 0) + 1; });
+  streakDeals.forEach(d => {
+    const raw = inferCountry(d);
+    const c = raw.replace(/^\S+\s*/, '').trim();
+    if (c && c !== 'Unknown') geoHeat[c] = (geoHeat[c] || 0) + 1;
+  });
+
+  const industryHeat = {};
+  streakDeals.filter(d => ACTIVE.has(d.stage_key)).forEach(d => {
+    const ind = d._industry || inferIndustry(d);
+    industryHeat[ind] = (industryHeat[ind] || 0) + 1;
+  });
+  const indMax = Math.max(1, ...Object.values(industryHeat));
+
+  // Merge external news fundraise signals
+  const newsSignals = (window._newsSignals || [])
+    .filter(n => n.type === 'funding_round')
+    .slice(0, 5);
 
   area.innerHTML = `
+    ${getModuleNews('fundradar')}
     <div class="radar-stats-row">
-      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-green)">${FUNDRAISING_SIGNALS.filter(s => s.confidence === 'High').length}</div><div class="stat-card-label">🔥 High Confidence</div></div>
-      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-orange)">${FUNDRAISING_SIGNALS.filter(s => s.confidence === 'Medium').length}</div><div class="stat-card-label">⚡ Medium Confidence</div></div>
-      <div class="stat-card"><div class="stat-card-value" style="color:var(--text-muted)">${FUNDRAISING_SIGNALS.filter(s => s.confidence === 'Low').length}</div><div class="stat-card-label">👀 Watching</div></div>
-      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-purple)">${FUNDRAISING_SIGNALS.length}</div><div class="stat-card-label">📡 Total Signals</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-green)">${signals.filter(s => s.confidence === 'High').length}</div><div class="stat-card-label">🔥 High Confidence</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-orange)">${signals.filter(s => s.confidence === 'Medium').length}</div><div class="stat-card-label">⚡ Medium Confidence</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--text-muted)">${signals.filter(s => s.confidence === 'Low').length}</div><div class="stat-card-label">👀 Watching</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-purple)">${signals.length}</div><div class="stat-card-label">📡 Active Deals</div></div>
     </div>
 
     <div class="phase3-grid">
       <div class="phase3-panel" style="flex:2">
-        <h3 class="phase3-panel-title">📡 Signal Feed</h3>
+        <h3 class="phase3-panel-title">📡 Signal Feed <span style="font-size:0.7rem;font-weight:400;color:var(--text-muted);margin-left:8px">Live · Streak CRM</span></h3>
+        ${newsSignals.length ? `<div style="margin-bottom:12px;padding:10px 14px;background:rgba(16,185,129,0.05);border:1px solid rgba(16,185,129,0.15);border-radius:8px"><div style="font-size:0.7rem;font-weight:600;color:var(--accent-green);margin-bottom:6px">📰 FROM NEWS (${newsSignals.length} funding rounds detected)</div>${newsSignals.map(n => `<div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px">• ${n.title} ${n.published_at ? '<span style="color:var(--text-muted);font-size:0.65rem">· ' + new Date(n.published_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}) + '</span>' : ''}</div>`).join('')}</div>` : ''}
         <div class="signal-feed">
-          ${FUNDRAISING_SIGNALS.map(sig => `
+          ${signals.map(sig => `
             <div class="signal-item" style="border-left:3px solid ${confColors[sig.confidence]}">
               <div class="signal-header">
                 <span class="signal-icon">${sig.icon}</span>
@@ -2341,68 +2605,122 @@ function renderFundRadar(area) {
           `).join('')}
         </div>
 
-        <h3 class="phase3-panel-title" style="margin-top:24px">📊 Stage Distribution</h3>
+        <h3 class="phase3-panel-title" style="margin-top:24px">🏭 Industry Mix</h3>
         <div class="geo-heat-list">
-          ${['Seed', 'Pre-Seed', 'Series A'].map(stage => {
-    const count = FUNDRAISING_SIGNALS.filter(s => s.estStage.includes(stage) || s.estStage === stage).length;
-    return `<div class="geo-heat-item">
-              <span class="geo-name">${stage}</span>
-              <div class="geo-bar-wrap"><div class="geo-bar" style="width:${(count / FUNDRAISING_SIGNALS.length) * 100}%;background:var(--accent-purple)"></div></div>
+          ${Object.entries(industryHeat).sort((a,b) => b[1]-a[1]).slice(0,8).map(([ind, count]) => `
+            <div class="geo-heat-item">
+              <span class="geo-name">${ind}</span>
+              <div class="geo-bar-wrap"><div class="geo-bar" style="width:${(count / indMax) * 100}%;background:var(--accent-purple)"></div></div>
               <span class="geo-count">${count}</span>
-            </div>`;
-  }).join('')}
+            </div>`).join('')}
         </div>
       </div>
     </div>
   `;
 }
 
-// ---- VC CRM Data ----
-const FOUNDER_RELATIONSHIPS = [
-  { name: 'Vikram Patel', company: 'QuickDeliver', role: 'CEO', strength: 5, lastContact: '2 days ago', nextFollowUp: 'Tomorrow', interactions: 12, warmIntro: 'Direct — met at YC Demo Day', notes: 'Very responsive. Prefers WhatsApp. Wife is co-founder at another portfolio co.', status: 'Active Deal' },
-  { name: 'Li Wei Chen', company: 'FactoryOS', role: 'CEO', strength: 4, lastContact: '1 week ago', nextFollowUp: 'In 3 days', interactions: 8, warmIntro: 'Via Rajesh (Sequoia)', notes: 'Technical founder, likes deep-dive conversations. Send him research papers.', status: 'Active Deal' },
-  { name: 'Sarah Tanaka', company: 'PlaySEA', role: 'CEO', strength: 3, lastContact: '2 weeks ago', nextFollowUp: 'Overdue', interactions: 5, warmIntro: 'Via Angel network — Singapore', notes: 'Ex-Grab. Wants strategic value-add, not just capital.', status: 'Pipeline' },
-  { name: 'Arjun Mehta', company: 'ChainFlow', role: 'CEO', strength: 4, lastContact: '3 days ago', nextFollowUp: 'Next week', interactions: 9, warmIntro: 'Direct — cold outreach converted', notes: 'Strong operator. Asks pointed questions. Bring data.', status: 'Active Deal' },
-  { name: 'Maria Santos', company: 'LendAPI', role: 'CEO', strength: 2, lastContact: '1 month ago', nextFollowUp: 'Overdue', interactions: 3, warmIntro: 'Via fintech conference', notes: 'Busy schedule. Best reached via LinkedIn DM.', status: 'Pipeline' },
-  { name: 'Nguyen Thi Lan', company: 'BunPho', role: 'CEO', strength: 4, lastContact: '5 days ago', nextFollowUp: 'In 5 days', interactions: 7, warmIntro: 'Via JV portfolio founder (Kim)', notes: 'Passionate about Vietnamese food tech. Good culture fit.', status: 'Active Deal' },
-  { name: 'Ravi Kumar', company: 'EyeQuality', role: 'CTO', strength: 3, lastContact: '10 days ago', nextFollowUp: 'In 2 days', interactions: 6, warmIntro: 'Via IIT Delhi alumni network', notes: 'Deep tech background. Wants to discuss AI architecture.', status: 'Pipeline' },
-  { name: 'Chen Wei', company: 'GreenMill', role: 'CEO', strength: 3, lastContact: '2 weeks ago', nextFollowUp: 'This week', interactions: 4, warmIntro: 'Via Temasek sustainability circle', notes: 'ESG expert. Connected to Shell APAC network.', status: 'Watching' }
-];
-
 function renderVCCRM(area) {
-  const overdue = FOUNDER_RELATIONSHIPS.filter(f => f.nextFollowUp === 'Overdue' || f.nextFollowUp === 'Tomorrow');
+  if (!streakDeals.length) {
+    area.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-secondary)">Loading CRM data from Streak...</div>';
+    return;
+  }
+
+  const now = Date.now();
+  const ACTIVE_DEAL_STAGES = new Set(['5011', '5004', '5014', '5007']);
+  const PIPELINE_STAGES    = new Set(['5002', '5003', '5018']);
+  const WATCHING_STAGES    = new Set(['5001', '5016', '5008', '5015']);
+
+  function getStatus(d) {
+    if (ACTIVE_DEAL_STAGES.has(d.stage_key)) return 'Active Deal';
+    if (PIPELINE_STAGES.has(d.stage_key)) return 'Pipeline';
+    return 'Watching';
+  }
+  function getDaysSince(d) {
+    const ts = d.last_email_timestamp ? parseInt(d.last_email_timestamp) :
+               d.updated_at ? parseInt(d.updated_at) : null;
+    if (!ts) return 999;
+    return Math.floor((now - ts) / 86400000);
+  }
+  function getLastContactLabel(days) {
+    if (days >= 999) return 'Never';
+    if (days === 0) return 'Today'; if (days === 1) return 'Yesterday';
+    if (days < 7) return `${days} days ago`; if (days < 14) return '1 week ago';
+    if (days < 30) return `${Math.floor(days/7)} weeks ago`;
+    return `${Math.floor(days/30)} months ago`;
+  }
+  function getNextFollowUp(d, days) {
+    if (d.stage_key === '5007') return 'Tomorrow';
+    if (days > 60) return 'Overdue'; if (days > 30) return 'This week';
+    if (days > 14) return 'In 2 weeks'; return 'Active';
+  }
+  function getStrength(d) {
+    const e = (d.total_sent_emails || 0) + (d.total_received_emails || 0);
+    if (ACTIVE_DEAL_STAGES.has(d.stage_key) && e > 10) return 5;
+    if (ACTIVE_DEAL_STAGES.has(d.stage_key)) return 4;
+    if (PIPELINE_STAGES.has(d.stage_key) && e > 5) return 3;
+    if (PIPELINE_STAGES.has(d.stage_key)) return 2; return 1;
+  }
+
+  const SHOW = new Set(['5007','5011','5004','5003','5002','5018','5001','5016','5008','5015','5014']);
+  const relationships = streakDeals
+    .filter(d => SHOW.has(d.stage_key))
+    .map(d => {
+      const days = getDaysSince(d);
+      const enrich = (window._dealEnrichments || {})[d.box_key] || {};
+      return {
+        d, enrich,
+        status: getStatus(d), days,
+        lastContact: getLastContactLabel(days),
+        nextFollowUp: getNextFollowUp(d, days),
+        strength: getStrength(d),
+        interactions: (d.total_sent_emails || 0) + (d.total_received_emails || 0),
+        name: (d.name || '').replace(/^www\./, '').replace(/\.(com|co\.in|io|ai|net|org)(\/.*)?$/i, ''),
+        industry: d._industry || inferIndustry(d),
+        country: d._country || inferCountry(d)
+      };
+    })
+    .sort((a, b) => {
+      const pri = x => x.d.stage_key === '5007' ? 0 : x.nextFollowUp === 'Overdue' ? 1 : 2;
+      return pri(a) - pri(b);
+    })
+    .slice(0, 60);
+
   const statusColors = { 'Active Deal': 'var(--accent-green)', 'Pipeline': 'var(--accent-blue)', 'Watching': 'var(--accent-orange)' };
+  const overdue = relationships.filter(r => r.nextFollowUp === 'Overdue' || r.d.stage_key === '5007');
+  const totalInteractions = relationships.reduce((a, r) => a + r.interactions, 0);
 
   area.innerHTML = `
+    ${getModuleNews('vccrm')}
     <div class="radar-stats-row">
-      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-green)">${FOUNDER_RELATIONSHIPS.filter(f => f.status === 'Active Deal').length}</div><div class="stat-card-label">Active Deals</div></div>
-      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-blue)">${FOUNDER_RELATIONSHIPS.filter(f => f.status === 'Pipeline').length}</div><div class="stat-card-label">In Pipeline</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-green)">${relationships.filter(r => r.status === 'Active Deal').length}</div><div class="stat-card-label">Active Deals</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-blue)">${relationships.filter(r => r.status === 'Pipeline').length}</div><div class="stat-card-label">In Pipeline</div></div>
       <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-red)">${overdue.length}</div><div class="stat-card-label">⚠️ Needs Attention</div></div>
-      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-purple)">${FOUNDER_RELATIONSHIPS.reduce((a, f) => a + f.interactions, 0)}</div><div class="stat-card-label">Total Interactions</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-purple)">${totalInteractions}</div><div class="stat-card-label">Total Email Interactions</div></div>
     </div>
 
     <div class="phase3-grid">
       <div class="phase3-panel" style="flex:2">
-        <h3 class="phase3-panel-title">👥 Founder Relationships</h3>
+        <h3 class="phase3-panel-title">👥 Founder Relationships <span style="font-size:0.7rem;font-weight:400;color:var(--text-muted);margin-left:8px">Live · ${relationships.length} companies · Streak CRM</span></h3>
         <div class="crm-list">
-          ${FOUNDER_RELATIONSHIPS.map(f => `
-            <div class="crm-card${f.nextFollowUp === 'Overdue' ? ' crm-overdue' : ''}">
+          ${relationships.map(r => `
+            <div class="crm-card${r.nextFollowUp === 'Overdue' || r.d.stage_key === '5007' ? ' crm-overdue' : ''}">
               <div class="crm-card-header">
                 <div>
-                  <strong class="crm-name">${f.name}</strong>
-                  <span class="crm-role">${f.role} @ ${f.company}</span>
+                  <strong class="crm-name">${r.name}</strong>
+                  <span class="crm-role">${r.enrich.founder_name ? r.enrich.founder_name + ' · ' : ''}${r.industry} · ${r.country}</span>
                 </div>
-                <div class="crm-strength">${'★'.repeat(f.strength)}${'☆'.repeat(5 - f.strength)}</div>
+                <div class="crm-strength">${'★'.repeat(r.strength)}${'☆'.repeat(5 - r.strength)}</div>
               </div>
               <div class="crm-card-body">
                 <div class="crm-meta-row">
-                  <span class="signal-tag" style="background:${statusColors[f.status]}22;color:${statusColors[f.status]}">${f.status}</span>
-                  <span class="crm-meta">📅 Last: ${f.lastContact}</span>
-                  <span class="crm-meta">${f.nextFollowUp === 'Overdue' ? '🔴' : '📌'} Next: ${f.nextFollowUp}</span>
-                  <span class="crm-meta">💬 ${f.interactions} interactions</span>
+                  <span class="signal-tag" style="background:${statusColors[r.status]}22;color:${statusColors[r.status]}">${r.status}</span>
+                  <span class="crm-meta">📅 ${r.lastContact}</span>
+                  <span class="crm-meta">${r.nextFollowUp === 'Overdue' || r.d.stage_key === '5007' ? '🔴' : '📌'} ${r.nextFollowUp}</span>
+                  <span class="crm-meta">💬 ${r.interactions} emails</span>
                 </div>
-                <div class="crm-notes">🔗 <strong>Intro:</strong> ${f.warmIntro}</div>
-                <div class="crm-notes">📝 ${f.notes}</div>
+                ${r.enrich.founder_background ? `<div class="crm-notes">👤 ${r.enrich.founder_background}</div>` : ''}
+                ${r.d.description ? `<div class="crm-notes" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">📝 ${r.d.description}</div>` : ''}
+                ${(r.enrich.investors||[]).length ? `<div class="crm-notes">🤝 Investors: ${r.enrich.investors.slice(0,3).join(', ')}</div>` : ''}
               </div>
             </div>
           `).join('')}
@@ -2412,27 +2730,25 @@ function renderVCCRM(area) {
       <div class="phase3-panel" style="flex:1">
         <h3 class="phase3-panel-title">🔔 Follow-Up Queue</h3>
         <div class="followup-queue">
-          ${FOUNDER_RELATIONSHIPS.filter(f => f.nextFollowUp === 'Overdue' || f.nextFollowUp === 'Tomorrow' || f.nextFollowUp.includes('2 days') || f.nextFollowUp.includes('3 days')).sort((a, b) => {
-    const pri = { 'Overdue': 0, 'Tomorrow': 1 };
-    return (pri[a.nextFollowUp] ?? 2) - (pri[b.nextFollowUp] ?? 2);
-  }).map(f => `
-            <div class="followup-item${f.nextFollowUp === 'Overdue' ? ' followup-urgent' : ''}">
-              <div class="followup-name">${f.name}</div>
-              <div class="followup-company">${f.company}</div>
-              <div class="followup-when">${f.nextFollowUp === 'Overdue' ? '🔴 OVERDUE' : '📅 ' + f.nextFollowUp}</div>
+          ${overdue.slice(0, 15).map(r => `
+            <div class="followup-item${r.nextFollowUp === 'Overdue' || r.d.stage_key === '5007' ? ' followup-urgent' : ''}">
+              <div class="followup-name">${r.name}</div>
+              <div class="followup-company">${r.industry} · ${r.country}</div>
+              <div class="followup-when">${r.d.stage_key === '5007' ? '🚨 URGENT' : '🔴 OVERDUE'}</div>
             </div>
           `).join('')}
+          ${overdue.length === 0 ? '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:0.85rem">✅ All caught up!</div>' : ''}
         </div>
 
-        <h3 class="phase3-panel-title" style="margin-top:24px">🌐 Intro Network</h3>
+        <h3 class="phase3-panel-title" style="margin-top:24px">📊 Stage Breakdown</h3>
         <div class="intro-network">
-          ${[...new Set(FOUNDER_RELATIONSHIPS.map(f => {
-    const via = f.warmIntro.match(/Via (.+?)(?:\s*[—–-]|$)/i);
-    return via ? via[1].trim() : 'Direct';
-  }))].map(source => {
-    const count = FOUNDER_RELATIONSHIPS.filter(f => f.warmIntro.includes(source)).length;
-    return `<div class="intro-source"><span class="intro-name">${source}</span><span class="intro-count">${count} intro${count > 1 ? 's' : ''}</span></div>`;
-  }).join('')}
+          ${(() => {
+            const counts = {};
+            streakDeals.forEach(d => { const n = STREAK_STAGE_NAMES[d.stage_key] || d.stage_key; counts[n] = (counts[n]||0)+1; });
+            return Object.entries(counts).sort((a,b)=>b[1]-a[1]).map(([s,c]) =>
+              `<div class="intro-source"><span class="intro-name">${s}</span><span class="intro-count">${c}</span></div>`
+            ).join('');
+          })()}
         </div>
       </div>
     </div>
@@ -3010,87 +3326,102 @@ ${portfolio.slice(0, 5).map((s, i) => `${i + 1}. **${s.name}** (${s.subSector}) 
 }
 
 // ---- Deal Velocity Tracker ----
-const VELOCITY_DATA = [
-  { deal: 'GreenMill', stage: 'Term Sheet', daysInPipeline: 18, daysPerStage: { sourced: 2, screening: 3, dd: 8, ic: 3, termSheet: 2 }, status: 'Fast' },
-  { deal: 'FactoryOS', stage: 'IC Review', daysInPipeline: 25, daysPerStage: { sourced: 1, screening: 5, dd: 12, ic: 7 }, status: 'Normal' },
-  { deal: 'SteelMind', stage: 'Due Diligence', daysInPipeline: 14, daysPerStage: { sourced: 2, screening: 4, dd: 8 }, status: 'Fast' },
-  { deal: 'KartBee', stage: 'Screening', daysInPipeline: 7, daysPerStage: { sourced: 3, screening: 4 }, status: 'Normal' },
-  { deal: 'QuickDeliver', stage: 'Closed', daysInPipeline: 32, daysPerStage: { sourced: 2, screening: 3, dd: 10, ic: 5, termSheet: 4, closed: 8 }, status: 'Normal' },
-  { deal: 'BunPho', stage: 'Due Diligence', daysInPipeline: 21, daysPerStage: { sourced: 1, screening: 6, dd: 14 }, status: 'Slow' },
-  { deal: 'ChainFlow', stage: 'IC Review', daysInPipeline: 19, daysPerStage: { sourced: 2, screening: 3, dd: 9, ic: 5 }, status: 'Normal' },
-  { deal: 'PlaySEA', stage: 'Screening', daysInPipeline: 5, daysPerStage: { sourced: 1, screening: 4 }, status: 'Fast' }
-];
-
 function renderDealVelocity(area) {
-  const stages = ['sourced', 'screening', 'dd', 'ic', 'termSheet', 'closed'];
-  const stageLabels = { sourced: 'Sourced', screening: 'Screening', dd: 'Due Diligence', ic: 'IC Review', termSheet: 'Term Sheet', closed: 'Closed' };
-  const avgDays = Math.round(VELOCITY_DATA.reduce((a, d) => a + d.daysInPipeline, 0) / VELOCITY_DATA.length);
-  const fastDeals = VELOCITY_DATA.filter(d => d.status === 'Fast').length;
-  const statusColors = { Fast: 'var(--accent-green)', Normal: 'var(--accent-blue)', Slow: 'var(--accent-red)' };
+  if (!streakDeals.length) {
+    area.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-secondary)">Loading velocity data from Streak CRM...</div>';
+    return;
+  }
 
-  // Funnel
-  const funnel = stages.map(s => ({ stage: stageLabels[s], count: VELOCITY_DATA.filter(d => Object.keys(d.daysPerStage).includes(s)).length }));
+  const now = Date.now();
+  const STAGE_ORDER  = ['5001','5016','5018','5002','5003','5011','5004','5014'];
+  const STAGE_LABELS = { '5001':'Sourced','5016':'Pinged','5018':'Meeting Set','5002':'Met+Active','5003':'Deep Dive','5011':'IC Review','5004':'Term Sheet','5014':'Closed' };
+  const STAGE_COLORS = { '5001':'#64748b','5016':'#6366f1','5018':'#8b5cf6','5002':'#f59e0b','5003':'#f97316','5011':'#ec4899','5004':'#10b981','5014':'#22c55e' };
+  const ACTIVE = new Set(['5002','5003','5011','5004','5007','5018']);
+  const statusColors = { Fast:'var(--accent-green)', Normal:'var(--accent-blue)', Slow:'var(--accent-red)' };
+
+  function getDaysIn(d) {
+    const ts = d.created_at ? parseInt(d.created_at) : null;
+    if (!ts) return 0;
+    return Math.floor((now - ts) / 86400000);
+  }
+  function getVelocity(d, days) {
+    const pos = STAGE_ORDER.indexOf(d.stage_key);
+    if (pos >= 5 && days < 60) return 'Fast';
+    if (pos <= 1 && days > 90) return 'Slow';
+    return 'Normal';
+  }
+
+  const funnel = STAGE_ORDER
+    .map(k => ({ key: k, stage: STAGE_LABELS[k], count: streakDeals.filter(d => d.stage_key === k).length }))
+    .filter(f => f.count > 0);
+
+  const activeDeals = streakDeals
+    .filter(d => ACTIVE.has(d.stage_key))
+    .map(d => { const days = getDaysIn(d); return { d, days, status: getVelocity(d, days) }; })
+    .sort((a, b) => b.days - a.days)
+    .slice(0, 20);
+
+  const avgDays = activeDeals.length ? Math.round(activeDeals.reduce((s, d) => s + d.days, 0) / activeDeals.length) : 0;
+  const fastCount = activeDeals.filter(d => d.status === 'Fast').length;
+  const maxDays = Math.max(1, ...activeDeals.map(d => d.days));
 
   area.innerHTML = `
+    ${getModuleNews('dealvelocity')}
     <div class="radar-stats-row">
-      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-green)">${avgDays}d</div><div class="stat-card-label">Avg Pipeline Days</div></div>
-      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-blue)">${fastDeals}</div><div class="stat-card-label">Fast-tracked Deals</div></div>
-      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-purple)">${VELOCITY_DATA.filter(d => d.stage === 'Closed').length}</div><div class="stat-card-label">Closed This Quarter</div></div>
-      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-orange)">${VELOCITY_DATA.length}</div><div class="stat-card-label">Active Pipeline</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-green)">${avgDays}d</div><div class="stat-card-label">Avg Active Days</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-blue)">${fastCount}</div><div class="stat-card-label">Fast-tracked</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-purple)">${streakDeals.filter(d => d.stage_key === '5014').length}</div><div class="stat-card-label">Portfolio (Closed)</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-orange)">${streakDeals.length}</div><div class="stat-card-label">Total Pipeline</div></div>
     </div>
 
     <div class="phase3-grid">
       <div class="phase3-panel" style="flex:2">
-        <h3 class="phase3-panel-title">⚡ Deal Timeline</h3>
+        <h3 class="phase3-panel-title">⚡ Deal Timeline <span style="font-size:0.7rem;font-weight:400;color:var(--text-muted);margin-left:8px">Top ${activeDeals.length} active · Live</span></h3>
         <div class="velocity-list">
-          ${VELOCITY_DATA.map(d => {
-    const maxDays = 40;
-    const barWidth = (d.daysInPipeline / maxDays) * 100;
+          ${activeDeals.map(({d, days, status}) => {
+    const name = (d.name||'').replace(/^www\./,'').replace(/\.(com|co\.in|io|ai|net|org)(\/.*)?$/i,'');
+    const stageName = STREAK_STAGE_NAMES[d.stage_key] || d.stage_key;
+    const stageColor = STAGE_COLORS[d.stage_key] || '#64748b';
+    const barWidth = Math.min((days / maxDays) * 100, 100);
     return `
               <div class="velocity-item">
                 <div class="velocity-header">
-                  <strong class="velocity-deal">${d.deal}</strong>
-                  <span class="signal-tag" style="background:${statusColors[d.status]}22;color:${statusColors[d.status]}">${d.status}</span>
-                  <span class="velocity-stage">${d.stage}</span>
-                  <span class="velocity-days">${d.daysInPipeline}d</span>
+                  <strong class="velocity-deal">${name}</strong>
+                  <span class="signal-tag" style="background:${statusColors[status]}22;color:${statusColors[status]}">${status}</span>
+                  <span class="velocity-stage" style="color:${stageColor}">${stageName}</span>
+                  <span class="velocity-days">${days}d</span>
                 </div>
                 <div class="velocity-bar-wrap">
-                  ${stages.filter(s => d.daysPerStage[s]).map(s => {
-      const w = (d.daysPerStage[s] / maxDays) * 100;
-      const colors = { sourced: '#64748b', screening: '#6366f1', dd: '#f59e0b', ic: '#ec4899', termSheet: '#10b981', closed: '#22c55e' };
-      return `<div class="velocity-segment" style="width:${w}%;background:${colors[s]}" title="${stageLabels[s]}: ${d.daysPerStage[s]}d"></div>`;
-    }).join('')}
+                  <div class="velocity-segment" style="width:${barWidth}%;background:${stageColor}" title="${stageName}: ${days} days in pipeline"></div>
                 </div>
               </div>`;
   }).join('')}
         </div>
         <div class="velocity-legend">
-          ${stages.map(s => {
-    const colors = { sourced: '#64748b', screening: '#6366f1', dd: '#f59e0b', ic: '#ec4899', termSheet: '#10b981', closed: '#22c55e' };
-    return `<span class="legend-item"><span class="legend-dot" style="background:${colors[s]}"></span>${stageLabels[s]}</span>`;
-  }).join('')}
+          ${STAGE_ORDER.map(k => STAGE_LABELS[k] ? `<span class="legend-item"><span class="legend-dot" style="background:${STAGE_COLORS[k]}"></span>${STAGE_LABELS[k]}</span>` : '').join('')}
         </div>
       </div>
 
       <div class="phase3-panel" style="flex:1">
-        <h3 class="phase3-panel-title">🔻 Conversion Funnel</h3>
+        <h3 class="phase3-panel-title">🔻 Pipeline Funnel</h3>
         <div class="funnel-list">
-          ${funnel.map((f, i) => `
+          ${funnel.map(f => `
             <div class="funnel-step">
-              <div class="funnel-bar" style="width:${(f.count / funnel[0].count) * 100}%;background:linear-gradient(90deg, var(--accent-blue), var(--accent-purple))"></div>
+              <div class="funnel-bar" style="width:${(f.count / funnel[0].count) * 100}%;background:${STAGE_COLORS[f.key]||'var(--accent-blue)'}"></div>
               <div class="funnel-label">${f.stage}</div>
               <div class="funnel-count">${f.count}</div>
             </div>
           `).join('')}
         </div>
 
-        <h3 class="phase3-panel-title" style="margin-top:24px">📊 Stage Avg Time</h3>
+        <h3 class="phase3-panel-title" style="margin-top:24px">📊 Stage Distribution</h3>
         <div class="geo-heat-list">
-          ${stages.map(s => {
-    const deals = VELOCITY_DATA.filter(d => d.daysPerStage[s]);
-    const avg = deals.length ? Math.round(deals.reduce((a, d) => a + d.daysPerStage[s], 0) / deals.length) : 0;
-    return `<div class="geo-heat-item"><span class="geo-name">${stageLabels[s]}</span><div class="geo-bar-wrap"><div class="geo-bar" style="width:${(avg / 15) * 100}%;background:var(--accent-purple)"></div></div><span class="geo-count">${avg}d</span></div>`;
-  }).join('')}
+          ${funnel.slice(0,8).map(f => `
+            <div class="geo-heat-item">
+              <span class="geo-name">${f.stage}</span>
+              <div class="geo-bar-wrap"><div class="geo-bar" style="width:${(f.count / funnel[0].count) * 100}%;background:${STAGE_COLORS[f.key]||'#6366f1'}"></div></div>
+              <span class="geo-count">${f.count}</span>
+            </div>`).join('')}
         </div>
       </div>
     </div>

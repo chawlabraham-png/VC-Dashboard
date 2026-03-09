@@ -1,0 +1,190 @@
+{
+  "name": "JV — Daily News Intelligence Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 7 * * *" }]
+        }
+      },
+      "name": "Daily 7am Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://economictimes.indiatimes.com/tech/startups/rssfeeds/78570550.cms",
+        "options": {}
+      },
+      "name": "Fetch ET Startups RSS",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1,
+      "position": [460, 160]
+    },
+    {
+      "parameters": {
+        "url": "https://www.vccircle.com/feed",
+        "options": {}
+      },
+      "name": "Fetch VCCircle RSS",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1,
+      "position": [460, 280]
+    },
+    {
+      "parameters": {
+        "url": "https://inc42.com/feed/",
+        "options": {}
+      },
+      "name": "Fetch Inc42 RSS",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1,
+      "position": [460, 400]
+    },
+    {
+      "parameters": {
+        "url": "https://e27.co/feed/",
+        "options": {}
+      },
+      "name": "Fetch e27 SEA RSS",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1,
+      "position": [460, 520]
+    },
+    {
+      "parameters": {
+        "mode": "mergeByPosition",
+        "options": {}
+      },
+      "name": "Merge All Feeds",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [680, 340]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.title }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "name": "Filter Valid Items",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [900, 340]
+    },
+    {
+      "parameters": {
+        "batchSize": 5,
+        "options": {}
+      },
+      "name": "Batch 5 Articles",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "create",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are an AI analyst for Jungle Ventures, a VC fund focused on India and Southeast Asia. Analyze startup/VC news articles and return structured JSON. Jungle Ventures invests in: SaaS/B2B, FinTech, HealthTech, AI/ML, Logistics, EdTech, Consumer, CleanTech, AgriTech across India, Singapore, Indonesia, Vietnam, Philippines, Malaysia.\n\nFor each article, return a JSON object with:\n- title: string (keep original)\n- summary: string (2-3 sentence summary)\n- ai_summary: string (1 crisp sentence for dashboard)\n- company: string or null (main company mentioned)\n- type: one of ['funding_round', 'fund_launch', 'partner_move', 'acquisition', 'ipo', 'market_signal', 'product_launch', 'regulatory', 'portfolio_signal', 'competitive_signal', 'general']\n- implication: string (1 sentence: what does this mean for a VC fund like Jungle Ventures?)\n- modules: array of module names this news is most relevant to, from: ['dealflow', 'portfolio', 'powermoves', 'fundradar', 'thesis', 'patterns', 'briefing', 'competitive', 'vccrm']\n- tags: array of strings (geography: India/SEA/Singapore/etc, sector: FinTech/SaaS/etc, stage: Seed/Series A/etc)\n- relevance_score: integer 0-100 (how relevant to Jungle Ventures' thesis and portfolio)\n\nOnly return the JSON object, no markdown code blocks."
+            },
+            {
+              "role": "user",
+              "content": "=Analyze these {{ $items().length }} articles:\n\n{{ $items().map((item, i) => `ARTICLE ${i+1}:\\nTitle: ${item.json.title}\\nSource: ${item.json.feed?.url || 'unknown'}\\nDate: ${item.json.pubDate || item.json.date || ''}\\nContent: ${(item.json.contentSnippet || item.json.summary || '').substring(0, 500)}\\n`).join('\\n---\\n') }}\n\nReturn a JSON array of analysis objects, one per article."
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.3,
+          "maxTokens": 2000
+        }
+      },
+      "name": "GPT Analyze Articles",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.4,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse GPT response and merge with original articles\nconst batchItems = $input.first();\nconst gptResponse = batchItems.json.message.content;\n\nlet analyses = [];\ntry {\n  // Clean response (remove markdown if present)\n  const cleaned = gptResponse.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n  analyses = JSON.parse(cleaned);\n  if (!Array.isArray(analyses)) analyses = [analyses];\n} catch(e) {\n  console.error('Failed to parse GPT response:', e.message);\n  return [];\n}\n\n// Map source URL to source name\nfunction getSourceName(url) {\n  if (!url) return 'Unknown';\n  if (url.includes('economictimes')) return 'Economic Times';\n  if (url.includes('vccircle')) return 'VCCircle';\n  if (url.includes('inc42')) return 'Inc42';\n  if (url.includes('e27')) return 'e27';\n  if (url.includes('techinasia')) return 'Tech In Asia';\n  if (url.includes('linkedin')) return 'LinkedIn';\n  return url.split('/')[2] || 'Unknown';\n}\n\nreturn analyses\n  .filter(a => a && a.title && a.relevance_score >= 40)\n  .map(a => ({\n    json: {\n      title: a.title || '',\n      summary: a.summary || '',\n      ai_summary: a.ai_summary || a.summary || '',\n      company: a.company || null,\n      type: a.type || 'general',\n      implication: a.implication || '',\n      modules: a.modules || ['briefing'],\n      tags: a.tags || [],\n      relevance_score: a.relevance_score || 50,\n      source: a.source || 'RSS',\n      source_url: a.source_url || null,\n      published_at: new Date().toISOString()\n    }\n  }));"
+      },
+      "name": "Parse GPT Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": {
+          "value": "public"
+        },
+        "table": {
+          "value": "news_signals"
+        },
+        "conflictTarget": "title",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "values": {
+            "title": "={{ $json.title }}",
+            "summary": "={{ $json.summary }}",
+            "ai_summary": "={{ $json.ai_summary }}",
+            "company": "={{ $json.company }}",
+            "type": "={{ $json.type }}",
+            "implication": "={{ $json.implication }}",
+            "modules": "={{ JSON.stringify($json.modules) }}",
+            "tags": "={{ JSON.stringify($json.tags) }}",
+            "relevance_score": "={{ $json.relevance_score }}",
+            "source": "={{ $json.source }}",
+            "source_url": "={{ $json.source_url }}",
+            "published_at": "={{ $json.published_at }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Upsert to Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1780, 300],
+      "credentials": {
+        "supabaseApi": {
+          "name": "Supabase — Jungle Ventures"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily 7am Trigger": {
+      "main": [[
+        { "node": "Fetch ET Startups RSS", "type": "main", "index": 0 },
+        { "node": "Fetch VCCircle RSS", "type": "main", "index": 0 },
+        { "node": "Fetch Inc42 RSS", "type": "main", "index": 0 },
+        { "node": "Fetch e27 SEA RSS", "type": "main", "index": 0 }
+      ]]
+    },
+    "Fetch ET Startups RSS": { "main": [[{ "node": "Merge All Feeds", "type": "main", "index": 0 }]] },
+    "Fetch VCCircle RSS":    { "main": [[{ "node": "Merge All Feeds", "type": "main", "index": 1 }]] },
+    "Fetch Inc42 RSS":       { "main": [[{ "node": "Merge All Feeds", "type": "main", "index": 2 }]] },
+    "Fetch e27 SEA RSS":     { "main": [[{ "node": "Merge All Feeds", "type": "main", "index": 3 }]] },
+    "Merge All Feeds":       { "main": [[{ "node": "Filter Valid Items", "type": "main", "index": 0 }]] },
+    "Filter Valid Items":    { "main": [[{ "node": "Batch 5 Articles", "type": "main", "index": 0 }]] },
+    "Batch 5 Articles":      { "main": [[{ "node": "GPT Analyze Articles", "type": "main", "index": 0 }]] },
+    "GPT Analyze Articles":  { "main": [[{ "node": "Parse GPT Response", "type": "main", "index": 0 }]] },
+    "Parse GPT Response":    { "main": [[{ "node": "Upsert to Supabase", "type": "main", "index": 0 }]] }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "notes": "SETUP INSTRUCTIONS:\n1. In n8n Credentials, add 'Supabase' credential:\n   - Host: https://vtxuzrkwnyhxciohwjjx.supabase.co\n   - Service Role Key: (get from Supabase Settings > API > service_role)\n2. Add 'OpenAI' credential with your API key\n3. The workflow runs daily at 7am\n4. Only articles with relevance_score >= 40 are saved\n5. Each article is tagged with which dashboard modules it's relevant to\n6. To also add LinkedIn: use the LinkedIn trigger node or HTTP Request to LinkedIn API"
+}

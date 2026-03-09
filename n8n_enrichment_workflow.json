@@ -1,0 +1,161 @@
+{
+  "name": "JV — GPT Deal Enrichment Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 2 * * *" }]
+        }
+      },
+      "name": "Nightly 2am Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "schema": { "value": "public" },
+        "table": { "value": "streak_deals" },
+        "limit": 801,
+        "filters": {},
+        "options": {}
+      },
+      "name": "Fetch All Streak Deals",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [460, 300],
+      "credentials": {
+        "supabaseApi": { "name": "Supabase — Jungle Ventures" }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "schema": { "value": "public" },
+        "table": { "value": "deal_enrichments" },
+        "returnAll": true,
+        "filters": {},
+        "options": { "select": "box_key,enriched_at" }
+      },
+      "name": "Fetch Existing Enrichments",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [460, 460],
+      "credentials": {
+        "supabaseApi": { "name": "Supabase — Jungle Ventures" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filter deals that haven't been enriched yet or are stale (>7 days old)\nconst deals = $('Fetch All Streak Deals').all().map(i => i.json);\nconst enriched = $('Fetch Existing Enrichments').all().map(i => i.json);\n\nconst enrichedMap = {};\nenriched.forEach(e => {\n  enrichedMap[e.box_key] = new Date(e.enriched_at);\n});\n\nconst sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);\n\n// Prioritize: urgent tracking (5007), IC (5011), deep dive (5003), term sheet (5004)\nconst PRIORITY_STAGES = new Set(['5007', '5011', '5003', '5004', '5002', '5018']);\n\nconst needsEnrichment = deals\n  .filter(d => {\n    if (!d.box_key) return false;\n    const lastEnriched = enrichedMap[d.box_key];\n    if (!lastEnriched) return true;   // Never enriched\n    if (lastEnriched < sevenDaysAgo && PRIORITY_STAGES.has(d.stage_key)) return true; // Stale priority deal\n    return false;\n  })\n  .sort((a, b) => {\n    // Priority stages first\n    const pa = PRIORITY_STAGES.has(a.stage_key) ? 0 : 1;\n    const pb = PRIORITY_STAGES.has(b.stage_key) ? 0 : 1;\n    return pa - pb;\n  })\n  .slice(0, 50);  // Max 50 per run to control OpenAI costs\n\nconsole.log(`Enriching ${needsEnrichment.length} deals (${deals.length} total, ${Object.keys(enrichedMap).length} already enriched)`);\nreturn needsEnrichment.map(d => ({ json: d }));"
+      },
+      "name": "Filter Unenriched Deals",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 380]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "name": "Process One by One",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [900, 380]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "create",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are a VC research analyst for Jungle Ventures, a fund investing in India and Southeast Asia. Research startups and return structured JSON with whatever you know about them. Be concise and factual. If you don't know something, use null.\n\nReturn a JSON object with these exact fields:\n{\n  \"founder_name\": \"string or null\",\n  \"founder_background\": \"1-2 sentence background of main founder\",\n  \"co_founders\": \"string: comma-separated names or null\",\n  \"founder_linkedin\": \"LinkedIn URL if known or null\",\n  \"website\": \"company website URL or null\",\n  \"founded_year\": integer or null,\n  \"employee_count\": \"string e.g. '50-100' or null\",\n  \"business_model\": \"1 sentence: how they make money\",\n  \"product_description\": \"2-3 sentence description of product/service\",\n  \"revenue\": \"known revenue or null e.g. '$2M ARR'\",\n  \"growth_rate\": \"string e.g. '3x YoY' or null\",\n  \"customers\": \"notable customers or customer count or null\",\n  \"total_raised\": \"string e.g. '$5M' or null\",\n  \"last_round\": \"string e.g. 'Seed $2M' or null\",\n  \"last_round_date\": \"string e.g. '2023-Q2' or null\",\n  \"investors\": [\"array of known investor firm names\"],\n  \"thesis_fit_score\": integer 0-100 (how well does this fit JV's thesis: B2B SaaS, FinTech, AI, HealthTech, Logistics in India/SEA),\n  \"thesis_fit_reason\": \"1 sentence explaining the score\",\n  \"strengths\": [\"array of 2-3 key strengths\"],\n  \"risks\": [\"array of 2-3 key risks\"],\n  \"competitors\": [\"array of 2-4 main competitors\"],\n  \"moat\": \"1 sentence describing competitive moat or null\",\n  \"market_size\": \"string e.g. '$5B TAM' or null\",\n  \"market_growth\": \"string e.g. '25% CAGR' or null\"\n}\n\nOnly return the JSON object."
+            },
+            {
+              "role": "user",
+              "content": "=Research this startup:\nName: {{ $json.name }}\nDescription: {{ $json.description || 'No description available' }}\nCountry: {{ $json.country || 'Unknown' }}\nFunding Stage: {{ $json.funding_stage || 'Unknown' }}\nDeal Size: {{ $json.deal_size || 'Unknown' }}\nCurrent Pipeline Stage: {{ $json.stage_key }}\n\nReturn the JSON research object."
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.2,
+          "maxTokens": 1000
+        }
+      },
+      "name": "GPT Research Deal",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.4,
+      "position": [1120, 380]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge GPT response with original deal data\nconst deal = $('Process One by One').first().json;\nconst gptRaw = $input.first().json.message.content;\n\nlet enrichment = {};\ntry {\n  const cleaned = gptRaw.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n  enrichment = JSON.parse(cleaned);\n} catch(e) {\n  console.error('Failed to parse GPT for deal:', deal.name, e.message);\n  return [{ json: { _skip: true } }];\n}\n\nreturn [{\n  json: {\n    box_key: deal.box_key,\n    company_name: deal.name,\n    founder_name: enrichment.founder_name || null,\n    founder_background: enrichment.founder_background || null,\n    co_founders: enrichment.co_founders || null,\n    founder_linkedin: enrichment.founder_linkedin || null,\n    website: enrichment.website || null,\n    founded_year: enrichment.founded_year || null,\n    employee_count: enrichment.employee_count || null,\n    business_model: enrichment.business_model || null,\n    product_description: enrichment.product_description || null,\n    revenue: enrichment.revenue || null,\n    growth_rate: enrichment.growth_rate || null,\n    customers: enrichment.customers || null,\n    total_raised: enrichment.total_raised || null,\n    last_round: enrichment.last_round || null,\n    last_round_date: enrichment.last_round_date || null,\n    investors: enrichment.investors || [],\n    thesis_fit_score: enrichment.thesis_fit_score || 0,\n    thesis_fit_reason: enrichment.thesis_fit_reason || null,\n    strengths: enrichment.strengths || [],\n    risks: enrichment.risks || [],\n    competitors: enrichment.competitors || [],\n    moat: enrichment.moat || null,\n    market_size: enrichment.market_size || null,\n    market_growth: enrichment.market_growth || null,\n    enriched_at: new Date().toISOString(),\n    enriched_by: 'gpt-4o-mini',\n    raw_response: gptRaw.substring(0, 2000)\n  }\n}];"
+      },
+      "name": "Prepare Enrichment Record",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 380]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [{ "value1": "={{ $json._skip }}", "value2": true, "operation": "notEqual" }]
+        }
+      },
+      "name": "Skip Failures",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1560, 380]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": { "value": "public" },
+        "table": { "value": "deal_enrichments" },
+        "conflictTarget": "box_key",
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "options": {}
+        },
+        "options": {}
+      },
+      "name": "Upsert Enrichment",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1780, 340],
+      "credentials": {
+        "supabaseApi": { "name": "Supabase — Jungle Ventures" }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 1000,
+        "unit": "milliseconds"
+      },
+      "name": "Rate Limit Pause",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1560, 520]
+    }
+  ],
+  "connections": {
+    "Nightly 2am Trigger":       { "main": [[{ "node": "Fetch All Streak Deals", "type": "main", "index": 0 }, { "node": "Fetch Existing Enrichments", "type": "main", "index": 0 }]] },
+    "Fetch All Streak Deals":    { "main": [[{ "node": "Filter Unenriched Deals", "type": "main", "index": 0 }]] },
+    "Fetch Existing Enrichments":{ "main": [[{ "node": "Filter Unenriched Deals", "type": "main", "index": 1 }]] },
+    "Filter Unenriched Deals":   { "main": [[{ "node": "Process One by One", "type": "main", "index": 0 }]] },
+    "Process One by One":        { "main": [[{ "node": "GPT Research Deal", "type": "main", "index": 0 }]] },
+    "GPT Research Deal":         { "main": [[{ "node": "Prepare Enrichment Record", "type": "main", "index": 0 }]] },
+    "Prepare Enrichment Record": { "main": [[{ "node": "Skip Failures", "type": "main", "index": 0 }]] },
+    "Skip Failures":             { "main": [[{ "node": "Upsert Enrichment", "type": "main", "index": 0 }], [{ "node": "Rate Limit Pause", "type": "main", "index": 0 }]] },
+    "Rate Limit Pause":          { "main": [[{ "node": "Process One by One", "type": "main", "index": 0 }]] }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "notes": "SETUP:\n1. Add Supabase credential (service_role key)\n2. Add OpenAI credential\n3. Runs nightly at 2am, enriches up to 50 deals per run\n4. Priority: Urgent (5007), IC (5011), Deep Dive (5003), Term Sheet (5004) first\n5. Re-enriches priority deals if >7 days old\n6. Cost estimate: ~50 deals/night × $0.001/deal = $0.05/night"
+}
