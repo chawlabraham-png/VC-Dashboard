@@ -1,0 +1,61 @@
+name: Deploy to Hostinger
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # Allow manual trigger from GitHub UI
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # config.js is gitignored — regenerate it from GitHub Secrets
+      - name: Generate config.js from secrets
+        run: |
+          cat > config.js << 'CONFIGEOF'
+          var CONFIG = {
+              supabaseUrl: 'SUPABASE_URL_PLACEHOLDER',
+              supabaseKey: 'SUPABASE_KEY_PLACEHOLDER',
+              streakApiKey: 'STREAK_KEY_PLACEHOLDER',
+              googleClientId: 'GOOGLE_CLIENT_ID_PLACEHOLDER',
+              gmailScopes: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.labels',
+              openaiApiKey: 'OPENAI_KEY_PLACEHOLDER',
+          };
+          CONFIGEOF
+          # Substitute actual secret values
+          sed -i "s|SUPABASE_URL_PLACEHOLDER|${{ secrets.SUPABASE_URL }}|g" config.js
+          sed -i "s|SUPABASE_KEY_PLACEHOLDER|${{ secrets.SUPABASE_KEY }}|g" config.js
+          sed -i "s|STREAK_KEY_PLACEHOLDER|${{ secrets.STREAK_API_KEY }}|g" config.js
+          sed -i "s|GOOGLE_CLIENT_ID_PLACEHOLDER|${{ secrets.GOOGLE_CLIENT_ID }}|g" config.js
+          sed -i "s|OPENAI_KEY_PLACEHOLDER|${{ secrets.OPENAI_API_KEY }}|g" config.js
+
+      # Replace ?v=3 (or any ?v=xxx) in index.html with the git commit short SHA
+      # This guarantees every deploy forces browsers to re-fetch JS/CSS
+      - name: Bust asset cache with git commit SHA
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          echo "Injecting cache-buster: $SHORT_SHA"
+          sed -i "s/?v=[^\"']*\"/?v=${SHORT_SHA}\"/g" index.html
+          # Verify the replacement worked
+          grep -E '\?v=' index.html
+
+      - name: Deploy to Hostinger via FTP
+        uses: SamKirkland/FTP-Deploy-Action@4.3.4
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          server-dir: /public_html/
+          # Exclude files that should never be deployed
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/node_modules/**
+            **/.netlify/**
+            **/CLAUDE_HANDOFF.md
+            **/schema.sql
+            **/README.md
+            **/config.template.js
