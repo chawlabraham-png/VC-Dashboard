@@ -3,19 +3,16 @@ name: Deploy to Hostinger
 on:
   push:
     branches: [main]
-  workflow_dispatch: # Allow manual trigger from GitHub UI
+  workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # config.js is gitignored — regenerate it from GitHub Secrets
-      # Secrets are passed as env vars (avoids shell escaping issues with /, +, = in keys)
-      # Python json.dumps handles all special characters safely
-      - name: Generate config.js from secrets
+      # Generate config.js from GitHub Secrets (file is gitignored)
+      - name: Generate config.js
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -26,12 +23,12 @@ jobs:
           python3 - << 'PYEOF'
           import os, json
           vals = {
-              'supabaseUrl':   os.environ['SUPABASE_URL'],
-              'supabaseKey':   os.environ['SUPABASE_KEY'],
-              'streakApiKey':  os.environ['STREAK_API_KEY'],
+              'supabaseUrl':    os.environ['SUPABASE_URL'],
+              'supabaseKey':    os.environ['SUPABASE_KEY'],
+              'streakApiKey':   os.environ['STREAK_API_KEY'],
               'googleClientId': os.environ.get('GOOGLE_CLIENT_ID', ''),
-              'gmailScopes':   'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.labels',
-              'openaiApiKey':  os.environ['OPENAI_API_KEY'],
+              'gmailScopes':    'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.labels',
+              'openaiApiKey':   os.environ['OPENAI_API_KEY'],
           }
           lines = ['var CONFIG = {']
           for k, v in vals.items():
@@ -39,37 +36,46 @@ jobs:
           lines.append('};')
           with open('config.js', 'w') as f:
               f.write('\n'.join(lines) + '\n')
-          print('✅ config.js generated successfully')
+          print('config.js generated OK')
           PYEOF
-          # Verify structure (GitHub auto-masks actual secret values in logs)
-          echo "--- config.js structure ---"
+          echo "=== config.js structure (secrets masked by GitHub) ==="
           cat config.js
 
-      # Replace ?v=3 (or any ?v=xxx) in index.html with the git commit short SHA
-      # This guarantees every deploy forces browsers to re-fetch JS/CSS
-      - name: Bust asset cache with git commit SHA
+      # Debug: confirm public_html exists on the FTP server before uploading
+      - name: Probe FTP directory structure
+        env:
+          FTP_HOST: ${{ secrets.FTP_SERVER }}
+          FTP_USER: ${{ secrets.FTP_USERNAME }}
+          FTP_PASS: ${{ secrets.FTP_PASSWORD }}
         run: |
-          SHORT_SHA=$(git rev-parse --short HEAD)
-          echo "Injecting cache-buster: $SHORT_SHA"
-          sed -i "s/?v=[^\"']*\"/?v=${SHORT_SHA}\"/g" index.html
-          # Verify the replacement worked
-          grep -E '\?v=' index.html
+          echo "=== FTP root ==="
+          curl -s --list-only -u "${FTP_USER}:${FTP_PASS}" "ftp://${FTP_HOST}/" || true
+          echo "=== public_html/ ==="
+          curl -s --list-only -u "${FTP_USER}:${FTP_PASS}" "ftp://${FTP_HOST}/public_html/" || true
 
-      - name: Deploy to Hostinger via FTP
+      # Upload every file explicitly with curl — no black-box, no skipping
+      - name: Upload files to Hostinger
+        env:
+          FTP_HOST: ${{ secrets.FTP_SERVER }}
+          FTP_USER: ${{ secrets.FTP_USERNAME }}
+          FTP_PASS: ${{ secrets.FTP_PASSWORD }}
         run: |
-          sudo apt-get install -y lftp
-          lftp -c "
-            set ftp:ssl-allow no;
-            set net:timeout 30;
-            set net:max-retries 3;
-            open -u '${{ secrets.FTP_USERNAME }}','${{ secrets.FTP_PASSWORD }}' '${{ secrets.FTP_SERVER }}';
-            mirror --reverse --verbose \
-              --exclude-glob .git \
-              --exclude-glob .github \
-              --exclude-glob .netlify \
-              --exclude-glob CLAUDE_HANDOFF.md \
-              --exclude-glob schema.sql \
-              --exclude-glob README.md \
-              --exclude-glob config.template.js \
-              . /public_html/;
-          "
+          upload() {
+            local file=$1
+            echo "→ uploading $file ..."
+            curl --fail --show-error --silent \
+                 --ftp-create-dirs \
+                 -u "${FTP_USER}:${FTP_PASS}" \
+                 -T "$file" \
+                 "ftp://${FTP_HOST}/public_html/${file}"
+            echo "✅ $file"
+          }
+          upload index.html
+          upload app.js
+          upload styles.css
+          upload config.js
+          upload data.js
+          upload charts.js
+          upload scoring.js
+          upload .htaccess
+          echo "=== All files uploaded ==="

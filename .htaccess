@@ -2,30 +2,17 @@
 # Jungle Ventures — Hostinger Production Config
 # ============================================================
 
+# Never cache anything — internal dashboard, freshness > speed
+<IfModule mod_headers.c>
+  Header set Cache-Control "no-cache, no-store, must-revalidate"
+  Header set Pragma "no-cache"
+  Header set Expires "0"
+</IfModule>
+
 # Enable GZIP compression
 <IfModule mod_deflate.c>
   AddOutputFilterByType DEFLATE text/html text/css text/javascript application/javascript application/json image/svg+xml
 </IfModule>
-
-# Browser caching
-<IfModule mod_expires.c>
-  ExpiresActive On
-  ExpiresByType text/html "access plus 0 seconds"
-  ExpiresByType text/css "access plus 1 month"
-  ExpiresByType application/javascript "access plus 1 month"
-  ExpiresByType image/svg+xml "access plus 1 month"
-  ExpiresByType font/woff2 "access plus 1 year"
-</IfModule>
-
-# Force HTML to never be cached — always fetch fresh from server
-# JS/CSS are safe to cache long-term because index.html uses ?v=<sha> query strings
-<FilesMatch "\.(html|htm)$">
-  <IfModule mod_headers.c>
-    Header set Cache-Control "no-cache, no-store, must-revalidate"
-    Header set Pragma "no-cache"
-    Header set Expires "0"
-  </IfModule>
-</FilesMatch>
 
 # Security headers
 <IfModule mod_headers.c>
@@ -34,7 +21,7 @@
   Header set Referrer-Policy "strict-origin-when-cross-origin"
 </IfModule>
 
-# Correct MIME type for JS modules
+# Correct MIME types
 <IfModule mod_mime.c>
   AddType application/javascript .js
   AddType text/css .css
