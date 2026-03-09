@@ -70,7 +70,7 @@ async function initSupabase() {
       try {
         const { data: sDeals, error: sErr } = await supabaseClient
           .from('streak_deals')
-          .select('*, streak_stages(stage_name, color, sort_order)')
+          .select('*')
           .order('updated_at', { ascending: false });
         if (!sErr && sDeals && sDeals.length > 0) {
           streakDeals = sDeals;
@@ -719,7 +719,7 @@ function openStreakDealModal(d) {
     const noteContent = document.getElementById('streak-note-input').value.trim();
     const noteType = document.getElementById('streak-note-type').value;
     if (!noteContent) return;
-    if (supabaseConnected && supabase) {
+    if (supabaseConnected && supabaseClient) {
       await supabaseClient.from('deal_notes').insert({
         deal_id: d.box_key,
         author_email: currentUser?.email || 'anonymous',
@@ -847,7 +847,7 @@ function openAddDealModal() {
       created_at: Date.now(), updated_at: Date.now()
     };
 
-    if (supabaseConnected && supabase) {
+    if (supabaseConnected && supabaseClient) {
       const { error } = await supabaseClient.from('streak_deals').insert(newDeal);
       if (error) { console.error('Save deal error:', error); alert('Error saving deal: ' + error.message); return; }
     }
@@ -2373,7 +2373,7 @@ function renderNetworkMap(area) {
     if (!linkerEl) return;
 
     let sectors = [], companies = [], comparisons = [], comps = [];
-    if (supabaseConnected && supabase) {
+    if (supabaseConnected && supabaseClient) {
       try {
         const [sRes, cRes, compRes, mRes] = await Promise.all([
           supabaseClient.from('industry_sectors').select('*'),
@@ -2529,7 +2529,7 @@ function renderCompetitive(area) {
     let sectorData = [];
     let comparisons = [];
 
-    if (supabaseConnected && supabase) {
+    if (supabaseConnected && supabaseClient) {
       try {
         const [compRes, sectorRes, comparisonRes] = await Promise.all([
           supabaseClient.from('public_companies').select('*').limit(20),
@@ -2628,7 +2628,7 @@ function renderPublicMarketComps(area) {
     let sectors = [];
     let comps = [];
 
-    if (supabaseConnected && supabase) {
+    if (supabaseConnected && supabaseClient) {
       try {
         const [cRes, sRes, mRes] = await Promise.all([
           supabaseClient.from('public_companies').select('*').order('market_cap_usd_bn', { ascending: false }),
@@ -2706,7 +2706,7 @@ function renderIndustryAnalyzer(area) {
     let companies = [];
     let news = [];
 
-    if (supabaseConnected && supabase) {
+    if (supabaseConnected && supabaseClient) {
       try {
         const [sRes, cRes, nRes] = await Promise.all([
           supabaseClient.from('industry_sectors').select('*').order('market_size_usd_bn', { ascending: false }),
@@ -3127,7 +3127,7 @@ window.handleGoogleLogin = async function (response) {
   localStorage.setItem('jv_user', JSON.stringify(currentUser));
 
   // Save to Supabase
-  if (supabaseConnected && supabase) {
+  if (supabaseConnected && supabaseClient) {
     try {
       await supabaseClient.from('user_profiles').upsert({
         email: user.email, name: user.name, avatar_url: user.picture,

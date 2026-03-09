@@ -246,26 +246,6 @@
   <script src="charts.js?v=3"></script>
   <script src="scoring.js?v=3"></script>
   <script src="app.js?v=3"></script>
-  <script>
-    // Triple-safety boot: DOMContentLoaded, load, and setTimeout
-    var _booted = false;
-    function safeBoot() {
-      if (_booted) return;
-      _booted = true;
-      try {
-        if (typeof boot === 'function') boot();
-      } catch (e) {
-        document.getElementById('content-area').innerHTML = '<div style="padding:40px;color:#ef4444"><h2>⚠️ Error</h2><pre style="color:#f59e0b;white-space:pre-wrap">' + e.message + '</pre></div>';
-      }
-    }
-    if (document.readyState === 'complete' || document.readyState === 'interactive') {
-      setTimeout(safeBoot, 0);
-    } else {
-      document.addEventListener('DOMContentLoaded', safeBoot);
-    }
-    window.addEventListener('load', safeBoot);
-    setTimeout(safeBoot, 2000); // Absolute fallback
-  </script>
 </body>
 
 </html>

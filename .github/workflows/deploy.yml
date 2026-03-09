@@ -82,4 +82,5 @@ jobs:
           upload charts.js
           upload scoring.js
           upload .htaccess
-          echo "=== All files uploaded ==="
+          echo ""
+          echo "✅ All files deployed to Hostinger"
