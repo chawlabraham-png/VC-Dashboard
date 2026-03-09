@@ -492,134 +492,280 @@ function getFilteredStartups() {
   });
 }
 
-// Streak stage name mapper
+// ============================================================
+// Streak CRM Intelligence Layer
+// Stage names/colors sourced from streak_stages table
+// ============================================================
 const STREAK_STAGE_NAMES = {
-  '5001': 'Lead', '5002': 'Met + Active', '5003': 'Deep Dive',
-  '5004': 'IC Review', '5007': 'Term Sheet', '5011': 'Portfolio',
-  '5014': 'Passed', '5018': 'Dead'
+  '5001': 'Lead', '5016': 'Pinged', '5018': 'Meeting Set Up',
+  '5002': 'Met+Active', '5003': 'Deep Dive', '5011': 'IC1/2/3',
+  '5004': 'Term Sheet', '5014': 'Portfolio', '5007': 'Urgent Tracking',
+  '5008': 'Non-urgent Tracking', '5015': 'Met+Track (Too Early)',
+  '5009': 'Met+Drop', '5006': 'Not Met+Drop', '5017': 'Shutdown/Acquired'
 };
 const STREAK_STAGE_COLORS = {
-  '5001': '#64748b', '5002': '#3b82f6', '5003': '#8b5cf6',
-  '5004': '#f59e0b', '5007': '#10b981', '5011': '#22c55e',
-  '5014': '#ef4444', '5018': '#6b7280'
+  '5001': '#E53935', '5016': '#FF703A', '5018': '#ff8c1e',
+  '5002': '#FFB302', '5003': '#89C540', '5011': '#1cad36',
+  '5004': '#009588', '5014': '#00b8d6', '5007': '#ef4444',
+  '5008': '#3b82f6', '5015': '#6735BA', '5009': '#9915AF',
+  '5006': '#7d25b5', '5017': '#D81A60'
+};
+const ACTIVE_STAGE_KEYS = new Set(['5001','5016','5018','5002','5003','5011','5004','5014','5007','5008','5015']);
+
+const STREAK_INDUSTRY_MAP = {
+  '9001':'Technology','9002':'HealthTech','9003':'EdTech','9004':'FinTech',
+  '9008':'Education','9009':'E-commerce','9011':'Logistics','9012':'Media',
+  '9013':'SaaS','9016':'Manufacturing','9018':'AgriTech','9027':'PropTech',
+  '9053':'CleanTech','9055':'Consumer','9058':'Digital Media','9063':'Food Tech',
+  '9096':'FinTech','9197':'B2B Software'
+};
+const STREAK_COUNTRY_MAP = {
+  '9001':'🇮🇳 India','9002':'🇲🇾 Malaysia','9003':'🇸🇬 Singapore',
+  '9004':'🇧🇩 Bangladesh','9005':'🇻🇳 Vietnam','9006':'🇹🇭 Thailand',
+  '9007':'🇵🇭 Philippines','9008':'🇮🇩 Indonesia','9060':'🌏 SEA','9061':'🌐 Global'
 };
 
-function renderDealFlow(area) {
-  const filtered = getFilteredStartups();
-  const hot = filtered.filter(s => s.scores.tier.class === 'tier-hot').length;
-  const avgScore = filtered.length ? Math.round(filtered.reduce((a, s) => a + s.scores.composite, 0) / filtered.length) : 0;
-  const totalDeals = filtered.length + streakDeals.length;
+function inferIndustry(d) {
+  if (d.industry && d.industry.length > 0) {
+    const code = String(Array.isArray(d.industry) ? d.industry[0] : d.industry);
+    if (STREAK_INDUSTRY_MAP[code]) return STREAK_INDUSTRY_MAP[code];
+  }
+  const text = `${d.name||''} ${d.description||''}`.toLowerCase();
+  if (/health|medic|clinic|pharma|hospital|doctor|therapy|diagnostics/.test(text)) return 'HealthTech';
+  if (/fintech|payment|lending|loan|credit|banking|wallet|insurance|neobank/.test(text)) return 'FinTech';
+  if (/edu|learn|school|college|course|tutor|upskill/.test(text)) return 'EdTech';
+  if (/food|restaurant|delivery|chef|meal|kitchen|recipe/.test(text)) return 'Food Tech';
+  if (/logistic|supply chain|freight|shipping|transport|fleet/.test(text)) return 'Logistics';
+  if (/saas|crm|erp|b2b|enterprise|workflow/.test(text)) return 'SaaS/B2B';
+  if (/ecommerce|e-commerce|marketplace|retail|shop|d2c/.test(text)) return 'E-commerce';
+  if (/\bai\b|artificial intelligence|\bml\b|machine learning|nlp|gpt|llm/.test(text)) return 'AI/ML';
+  if (/climate|solar|renewable|green|carbon|cleantech/.test(text)) return 'CleanTech';
+  if (/real estate|proptech|property|housing|realty/.test(text)) return 'PropTech';
+  if (/agri|farm|crop|harvest|agriculture/.test(text)) return 'AgriTech';
+  if (/media|content|streaming|video|music|creator|entertainment/.test(text)) return 'Media';
+  if (/gaming|game|esport/.test(text)) return 'Gaming';
+  if (/cyber|security|fraud/.test(text)) return 'CyberSecurity';
+  return 'Technology';
+}
 
-  // Filter streak deals
-  const filteredStreak = streakDeals.filter(d => {
-    if (filters.search) {
-      const q = filters.search;
-      if (!d.name.toLowerCase().includes(q) && !(d.country || '').toLowerCase().includes(q)) return false;
-    }
-    if (filters.geo !== 'All' && d.country !== filters.geo) return false;
-    return true;
+function inferCountry(d) {
+  if (!d.country) return null;
+  return STREAK_COUNTRY_MAP[String(d.country)] || d.country;
+}
+
+function scoreStreakDeal(d) {
+  let score = 0;
+  const stagePts = {'5001':8,'5016':12,'5018':18,'5002':25,'5003':32,'5011':40,'5004':40,'5007':22,'5008':16,'5015':12,'5014':35};
+  score += stagePts[d.stage_key] || 5;
+  score += Math.min(25, Math.round((d.total_emails||0) * 1.5));
+  if ((d.total_emails||0) > 0) score += Math.round(((d.total_received_emails||0) / d.total_emails) * 20);
+  if (d.last_email_timestamp) {
+    const days = (Date.now() - d.last_email_timestamp) / 86400000;
+    if (days < 7) score += 15; else if (days < 14) score += 10; else if (days < 30) score += 5;
+  }
+  if (d.description) score += 2; if (d.funding_stage) score += 2;
+  if (d.country) score += 2; if (d.industry && d.industry.length > 0) score += 2;
+  return Math.min(100, Math.round(score));
+}
+
+function getFollowUpStatus(d) {
+  if (d.stage_key === '5007') return { label: '🚨 Urgent', color: '#ef4444', bg: '#ef444420', priority: 0 };
+  const last = d.last_email_timestamp;
+  if (!last && ACTIVE_STAGE_KEYS.has(d.stage_key)) return { label: '📭 No contact', color: '#6b7280', bg: '#6b728020', priority: 3 };
+  if (!last) return { label: '—', color: '#6b7280', bg: 'transparent', priority: 5 };
+  const days = (Date.now() - last) / 86400000;
+  if (days < 14) return { label: '✅ Active', color: '#10b981', bg: '#10b98120', priority: 4 };
+  if (days < 30) return { label: '⚡ Follow up', color: '#f59e0b', bg: '#f59e0b20', priority: 1 };
+  return { label: '🔴 Stale', color: '#ef4444', bg: '#ef444420', priority: 2 };
+}
+
+function formatLastContact(ts) {
+  if (!ts) return { text: 'No contact', color: '#6b7280' };
+  const days = Math.floor((Date.now() - ts) / 86400000);
+  const color = days < 14 ? '#10b981' : days < 30 ? '#f59e0b' : '#ef4444';
+  if (days === 0) return { text: 'Today', color };
+  if (days === 1) return { text: 'Yesterday', color };
+  if (days < 7) return { text: `${days}d ago`, color };
+  if (days < 30) return { text: `${Math.floor(days/7)}w ago`, color };
+  return { text: `${Math.floor(days/30)}mo ago`, color };
+}
+
+function renderDealFlow(area) {
+  // Score and annotate all streak deals
+  let filtered = streakDeals.map(d => ({
+    ...d,
+    _score: scoreStreakDeal(d),
+    _fu: getFollowUpStatus(d),
+    _industry: inferIndustry(d),
+    _country: inferCountry(d)
+  }));
+
+  // Apply header filters
+  if (filters.search) {
+    const q = filters.search.toLowerCase();
+    filtered = filtered.filter(d => `${d.name} ${d.description||''} ${d._industry}`.toLowerCase().includes(q));
+  }
+  if (filters.geo !== 'All') {
+    filtered = filtered.filter(d => (d._country||'').includes(filters.geo) || String(d.country) === filters.geo);
+  }
+  if (filters.sector !== 'All') {
+    filtered = filtered.filter(d => d._industry === filters.sector);
+  }
+
+  // Sort: urgent first, then by score desc
+  filtered.sort((a, b) => {
+    if (a._fu.priority !== b._fu.priority) return a._fu.priority - b._fu.priority;
+    return b._score - a._score;
   });
+
+  const urgent = filtered.filter(d => d.stage_key === '5007').length;
+  const needsFollowUp = filtered.filter(d => d._fu.priority <= 2).length;
+  const avgScore = filtered.length ? Math.round(filtered.reduce((s, d) => s + d._score, 0) / filtered.length) : 0;
 
   area.innerHTML = `
     <div class="stats-bar">
       <div class="stat-card">
         <div class="stat-label">Total Deals</div>
-        <div class="stat-value emerald">${totalDeals}</div>
-        <div class="stat-change positive">${filtered.length} scored + ${streakDeals.length} Streak</div>
+        <div class="stat-value emerald">${filtered.length}</div>
+        <div class="stat-change positive">of ${streakDeals.length} from Streak CRM</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">Streak CRM Deals</div>
-        <div class="stat-value blue">${streakDeals.length}</div>
-        <div class="stat-change positive">🔄 Synced from Streak</div>
+        <div class="stat-label">🚨 Urgent Tracking</div>
+        <div class="stat-value" style="color:#ef4444">${urgent}</div>
+        <div class="stat-change">Immediate attention</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">Hot Deals</div>
-        <div class="stat-value orange">${hot}</div>
-        <div class="stat-change positive">🔥 Immediate attention</div>
+        <div class="stat-label">⚡ Follow-up Needed</div>
+        <div class="stat-value orange">${needsFollowUp}</div>
+        <div class="stat-change">Stale or overdue</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">Average Score</div>
+        <div class="stat-label">Avg Deal Score</div>
         <div class="stat-value blue">${avgScore}</div>
-        <div class="stat-change ${avgScore > 60 ? 'positive' : ''}">${avgScore > 60 ? '↑ Above threshold' : '→ Monitoring'}</div>
+        <div class="stat-change ${avgScore > 50 ? 'positive' : ''}">Engagement + stage</div>
       </div>
     </div>
 
-    <div class="pipeline-tabs" style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
-      <button class="pipeline-tab ${pipelineTab === 'all' ? 'active' : ''}" data-tab="all" style="padding:6px 16px;border-radius:8px;border:1px solid var(--border-primary);background:${pipelineTab === 'all' ? 'var(--accent-blue)' : 'var(--bg-secondary)'};color:${pipelineTab === 'all' ? 'white' : 'var(--text-secondary)'};cursor:pointer;font-size:0.8rem">All Deals (${totalDeals})</button>
-      <button class="pipeline-tab ${pipelineTab === 'streak' ? 'active' : ''}" data-tab="streak" style="padding:6px 16px;border-radius:8px;border:1px solid var(--border-primary);background:${pipelineTab === 'streak' ? 'var(--accent-purple)' : 'var(--bg-secondary)'};color:${pipelineTab === 'streak' ? 'white' : 'var(--text-secondary)'};cursor:pointer;font-size:0.8rem">🔄 Streak CRM (${streakDeals.length})</button>
-      <button class="pipeline-tab ${pipelineTab === 'scored' ? 'active' : ''}" data-tab="scored" style="padding:6px 16px;border-radius:8px;border:1px solid var(--border-primary);background:${pipelineTab === 'scored' ? 'var(--accent-green)' : 'var(--bg-secondary)'};color:${pipelineTab === 'scored' ? 'white' : 'var(--text-secondary)'};cursor:pointer;font-size:0.8rem">📊 Scored Deals (${filtered.length})</button>
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
+      <button class="pipeline-tab" data-tab="all"
+        style="padding:6px 16px;border-radius:8px;border:1px solid var(--border-primary);background:${pipelineTab==='all'?'var(--accent-blue)':'var(--bg-secondary)'};color:${pipelineTab==='all'?'white':'var(--text-secondary)'};cursor:pointer;font-size:0.8rem">
+        All (${filtered.length})</button>
+      <button class="pipeline-tab" data-tab="industry"
+        style="padding:6px 16px;border-radius:8px;border:1px solid var(--border-primary);background:${pipelineTab==='industry'?'var(--accent-purple)':'var(--bg-secondary)'};color:${pipelineTab==='industry'?'white':'var(--text-secondary)'};cursor:pointer;font-size:0.8rem">
+        By Industry</button>
+      <button class="pipeline-tab" data-tab="stage"
+        style="padding:6px 16px;border-radius:8px;border:1px solid var(--border-primary);background:${pipelineTab==='stage'?'var(--accent-green)':'var(--bg-secondary)'};color:${pipelineTab==='stage'?'white':'var(--text-secondary)'};cursor:pointer;font-size:0.8rem">
+        Pipeline Stages</button>
+      <button class="pipeline-tab" data-tab="followup"
+        style="padding:6px 16px;border-radius:8px;border:1px solid var(--border-primary);background:${pipelineTab==='followup'?'#ef4444':'var(--bg-secondary)'};color:${pipelineTab==='followup'?'white':'var(--text-secondary)'};cursor:pointer;font-size:0.8rem">
+        🚨 Follow-ups (${needsFollowUp})</button>
       <div style="flex:1"></div>
       <button id="add-deal-btn" style="padding:6px 16px;border-radius:8px;border:none;background:var(--accent-green);color:white;cursor:pointer;font-size:0.8rem;font-weight:600">+ Add Deal</button>
     </div>
 
-    <div class="deal-grid">
-      ${(pipelineTab === 'all' || pipelineTab === 'streak') ? filteredStreak.map((d, i) => renderStreakDealCard(d, i)).join('') : ''}
-      ${(pipelineTab === 'all' || pipelineTab === 'scored') ? filtered.map((s, i) => renderDealCard(s, i)).join('') : ''}
-      ${totalDeals === 0 ? '<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--text-muted)">No deals found. Add deals manually or sync from Streak CRM.</div>' : ''}
+    <div id="deal-flow-content">
+      ${pipelineTab === 'all'      ? renderDealGrid(filtered) : ''}
+      ${pipelineTab === 'industry' ? renderByIndustry(filtered) : ''}
+      ${pipelineTab === 'stage'    ? renderByStage(filtered) : ''}
+      ${pipelineTab === 'followup' ? renderDealGrid(filtered.filter(d => d._fu.priority <= 2)) : ''}
     </div>
   `;
 
-  // Tab clicks
   area.querySelectorAll('.pipeline-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      pipelineTab = tab.dataset.tab;
-      renderDealFlow(area);
-    });
+    tab.addEventListener('click', () => { pipelineTab = tab.dataset.tab; renderDealFlow(area); });
   });
-
-  // Add deal button
   document.getElementById('add-deal-btn')?.addEventListener('click', () => openAddDealModal());
-
-  // Scored deal card clicks
-  area.querySelectorAll('.deal-card[data-id]').forEach(card => {
-    card.addEventListener('click', () => {
-      const id = card.dataset.id;
-      const startup = rankedStartups.find(s => s.id === id);
-      if (startup) openDealModal(startup);
-    });
-  });
-
-  // Streak deal card clicks
   area.querySelectorAll('.streak-deal-card[data-boxkey]').forEach(card => {
     card.addEventListener('click', () => {
-      const key = card.dataset.boxkey;
-      const deal = streakDeals.find(d => d.box_key === key);
-      if (deal) openStreakDealModal(deal);
+      const deal = streakDeals.find(d => d.box_key === card.dataset.boxkey);
+      if (deal) openStreakDealModal({ ...deal, _score: scoreStreakDeal(deal) });
     });
   });
 }
 
-function renderStreakDealCard(d, idx) {
-  const stageName = STREAK_STAGE_NAMES[d.stage_key] || d.stage_key || 'Unknown';
+function renderDealGrid(deals) {
+  if (!deals.length) return '<div style="text-align:center;padding:48px;color:var(--text-muted)">No deals match current filters.</div>';
+  return `<div class="deal-grid">${deals.map(d => renderStreakDealCard(d)).join('')}</div>`;
+}
+
+function renderByIndustry(deals) {
+  const groups = {};
+  deals.forEach(d => { const k = d._industry||'Other'; (groups[k]||(groups[k]=[])).push(d); });
+  return Object.entries(groups).sort((a,b) => b[1].length - a[1].length).map(([ind, group]) => `
+    <div style="margin-bottom:24px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:8px 14px;background:var(--bg-secondary);border-radius:8px;border-left:3px solid var(--accent-purple)">
+        <span style="font-weight:700;color:var(--text-primary)">${ind}</span>
+        <span style="font-size:0.72rem;padding:2px 8px;border-radius:12px;background:var(--accent-purple)20;color:var(--accent-purple)">${group.length} deals</span>
+        <span style="font-size:0.7rem;color:var(--text-muted);margin-left:auto">avg score: ${Math.round(group.reduce((s,d)=>s+d._score,0)/group.length)}</span>
+      </div>
+      <div class="deal-grid">${group.map(d => renderStreakDealCard(d)).join('')}</div>
+    </div>`).join('');
+}
+
+function renderByStage(deals) {
+  const order = ['5007','5011','5004','5003','5002','5018','5016','5008','5001','5015','5014','5009','5006','5017'];
+  const groups = {};
+  deals.forEach(d => { (groups[d.stage_key]||(groups[d.stage_key]=[])).push(d); });
+  return order.filter(k => groups[k]).map(k => {
+    const color = STREAK_STAGE_COLORS[k]||'#64748b';
+    return `
+    <div style="margin-bottom:24px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:8px 14px;background:var(--bg-secondary);border-radius:8px;border-left:3px solid ${color}">
+        <span style="font-weight:700;color:${color}">${STREAK_STAGE_NAMES[k]||k}</span>
+        <span style="font-size:0.72rem;padding:2px 8px;border-radius:12px;background:${color}20;color:${color}">${groups[k].length} deals</span>
+      </div>
+      <div class="deal-grid">${groups[k].map(d => renderStreakDealCard(d)).join('')}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderStreakDealCard(d) {
   const stageColor = STREAK_STAGE_COLORS[d.stage_key] || '#64748b';
-  const assignees = (() => { try { return JSON.parse(d.assigned_to || '[]'); } catch { return []; } })();
-  const updatedDate = d.updated_at ? new Date(parseInt(d.updated_at)).toLocaleDateString() : '';
+  const stageName  = STREAK_STAGE_NAMES[d.stage_key]  || d.stage_key;
+  const industry   = d._industry || inferIndustry(d);
+  const country    = d._country  || inferCountry(d);
+  const score      = d._score    !== undefined ? d._score : scoreStreakDeal(d);
+  const fu         = d._fu       || getFollowUpStatus(d);
+  const lc         = formatLastContact(d.last_email_timestamp);
+  const assignees  = (() => { try { return JSON.parse(d.assigned_to||'[]'); } catch { return []; } })();
+  const scoreColor = score >= 70 ? '#10b981' : score >= 45 ? '#f59e0b' : '#ef4444';
+  const name = (d.name||'').replace(/^www\./,'').replace(/\.(com|co\.in|co|in|io|ai|vc|org|net)(\/.*)?$/i,'');
 
   return `
-    <div class="deal-card streak-deal-card animated-item" data-boxkey="${d.box_key}" style="border-left:3px solid ${stageColor}">
-      <div class="deal-info">
-        <div class="deal-header">
-          <div class="deal-logo">🔄</div>
-          <div class="deal-name">${d.name}</div>
-          <span class="deal-tier-badge" style="background:${stageColor}22;color:${stageColor};border:1px solid ${stageColor}44">${stageName}</span>
+    <div class="deal-card streak-deal-card animated-item" data-boxkey="${d.box_key}" style="border-left:3px solid ${stageColor};cursor:pointer">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:0.95rem;font-weight:700;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${name}</div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">
+            <span style="font-size:0.65rem;padding:2px 7px;border-radius:10px;background:${stageColor}20;color:${stageColor};font-weight:600">${stageName}</span>
+            <span style="font-size:0.65rem;padding:2px 7px;border-radius:10px;background:var(--accent-purple)15;color:var(--accent-purple)">${industry}</span>
+            ${country ? `<span style="font-size:0.65rem;padding:2px 7px;border-radius:10px;background:var(--bg-tertiary);color:var(--text-muted)">${country}</span>` : ''}
+          </div>
         </div>
-        <div class="deal-meta">
-          ${d.funding_stage ? `<span class="deal-tag">${d.funding_stage}</span>` : ''}
-          ${d.country ? `<span class="deal-tag geo">📍 ${d.country}</span>` : ''}
-          ${d.deal_size ? `<span class="deal-tag">💰 ${d.deal_size}</span>` : ''}
-          <span class="deal-tag" style="background:var(--accent-purple)15;color:var(--accent-purple)">Streak</span>
+        <div style="text-align:right;min-width:44px;margin-left:8px">
+          <div style="font-size:1.2rem;font-weight:800;color:${scoreColor}">${score}</div>
+          <div style="font-size:0.55rem;color:var(--text-muted)">SCORE</div>
         </div>
-        ${d.notes ? `<div style="font-size:0.75rem;color:var(--text-muted);margin-top:6px;max-height:32px;overflow:hidden">${d.notes.substring(0, 100)}${d.notes.length > 100 ? '...' : ''}</div>` : ''}
       </div>
-      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;min-width:80px">
-        <div style="font-size:0.7rem;color:var(--text-muted)">${updatedDate}</div>
+      ${d.description ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:8px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${d.description}</div>` : ''}
+      <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">
+        ${d.funding_stage ? `<span style="font-size:0.65rem;padding:2px 7px;border-radius:10px;background:var(--accent-green)15;color:var(--accent-green)">${d.funding_stage}</span>` : ''}
+        <span style="font-size:0.65rem;padding:2px 7px;border-radius:10px;background:${fu.bg};color:${fu.color};font-weight:600">${fu.label}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding-top:6px;border-top:1px solid var(--border-primary)">
+        <div>
+          <div style="font-size:0.6rem;color:var(--text-muted)">Last contact</div>
+          <div style="font-size:0.72rem;font-weight:600;color:${lc.color}">${lc.text}</div>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:0.6rem;color:var(--text-muted)">Emails</div>
+          <div style="font-size:0.72rem;color:var(--text-secondary)">↑${d.total_sent_emails||0} ↓${d.total_received_emails||0}</div>
+        </div>
         <div style="display:flex;gap:2px">
-          ${assignees.slice(0, 3).map(a => `<span title="${a.name || a.email}" style="width:22px;height:22px;border-radius:50%;background:var(--accent-blue);color:white;font-size:0.55rem;display:flex;align-items:center;justify-content:center">${(a.name || 'U').split(' ').map(n => n[0]).join('').substring(0, 2)}</span>`).join('')}
+          ${assignees.slice(0,3).map(a=>`<span title="${a.name||a.email}" style="width:22px;height:22px;border-radius:50%;background:var(--accent-blue);color:white;font-size:0.5rem;display:flex;align-items:center;justify-content:center;font-weight:700">${(a.name||'U').split(' ').map(n=>n[0]).join('').substring(0,2)}</span>`).join('')}
         </div>
-        <div style="font-size:0.65rem;color:var(--text-muted)">${d.total_emails || 0} emails</div>
       </div>
-    </div>
-  `;
+    </div>`;
 }
 
 function openStreakDealModal(d) {
