@@ -41,17 +41,17 @@ jobs:
           echo "=== config.js structure (secrets masked by GitHub) ==="
           cat config.js
 
-      # Debug: confirm public_html exists on the FTP server before uploading
+      # Debug: confirm FTP credentials and directory structure
       - name: Probe FTP directory structure
         env:
           FTP_HOST: ${{ secrets.FTP_SERVER }}
           FTP_USER: ${{ secrets.FTP_USERNAME }}
           FTP_PASS: ${{ secrets.FTP_PASSWORD }}
         run: |
-          echo "=== FTP root ==="
-          curl -s --list-only -u "${FTP_USER}:${FTP_PASS}" "ftp://${FTP_HOST}/" || true
-          echo "=== public_html/ ==="
-          curl -s --list-only -u "${FTP_USER}:${FTP_PASS}" "ftp://${FTP_HOST}/public_html/" || true
+          echo "=== FTP_HOST value ==="
+          echo "$FTP_HOST"
+          echo "=== Verbose FTP connect + list root ==="
+          curl -v --list-only -u "${FTP_USER}:${FTP_PASS}" "ftp://${FTP_HOST}/" 2>&1 || true
 
       # Upload every file explicitly with curl — no black-box, no skipping
       - name: Upload files to Hostinger
