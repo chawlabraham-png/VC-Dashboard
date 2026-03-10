@@ -17,7 +17,7 @@ if (typeof CONFIG === 'undefined') {
 let rankedStartups = [];
 let streakDeals = [];  // Real Streak CRM deals
 let currentSection = 'dealflow';
-let filters = { geo: 'All', sector: 'All', tier: 'All', search: '' };
+let filters = { geo: 'All', sector: 'All', tier: 'All', people: 'All', search: '' };
 let uploadedDecks = [];
 let currentUser = { email: 'guest@jungleventures.com', name: 'Guest User', avatar: '' };
 let pipelineTab = 'all'; // 'all', 'streak', 'scored'
@@ -314,18 +314,7 @@ function openGmailSetupModal() {
 }
 
 // ---- Valuation Comps Data ----
-const VALUATION_COMPS = [
-  { name: "KartBee", stage: "Pre-Seed", revenue: "$45K MRR", growth: "280%", fairVal: "$8-12M", currentVal: "$10M", status: "fair", model: "Quick Commerce", comps: ["Zepto (Pre-Seed: $12M)", "Blinkit early ($8M)", "Swish (SG: $6M)"], nextRound: "Seed at $25-35M in 6-9 months if hits $150K MRR", risks: "Unit economics unproven in Tier-2; heavy capex" },
-  { name: "FactoryOS", stage: "Seed", revenue: "$180K MRR", growth: "200%", fairVal: "$28-38M", currentVal: "$32M", status: "fair", model: "Smart Factory SaaS", comps: ["Sight Machine (Seed: $30M)", "Tulip Interfaces ($35M)", "MOI (India: $25M)"], nextRound: "Series A at $60-80M in 9-12 months", risks: "Long enterprise sales cycle; integration complexity" },
-  { name: "Playlo", stage: "Pre-Series A", revenue: "$28K MRR", growth: "180%", fairVal: "$18-25M", currentVal: "$22M", status: "fair", model: "Social Gaming", comps: ["Hago (SEA: $20M)", "Winzo (India: $25M at seed)", "Aura (ID: $15M)"], nextRound: "Series A at $50-70M if DAU exceeds 200K", risks: "Retention cliff typical in casual gaming; monetization per user low" },
-  { name: "QualityLens", stage: "Series A", revenue: "$680K MRR", growth: "180%", fairVal: "$55-75M", currentVal: "$62M", status: "fair", model: "Visual Inspection AI", comps: ["Landing AI ($65M Series A)", "Instrumental ($58M)", "Eigen Innovations ($42M)"], nextRound: "Series B at $150-200M in 12-15 months", risks: "GPU costs at scale; accuracy claims need third-party validation" },
-  { name: "SteelMind", stage: "Series A", revenue: "$920K MRR", growth: "140%", fairVal: "$48-62M", currentVal: "$58M", status: "fair", model: "Predictive Maintenance", comps: ["Augury ($55M Series A)", "Senseye ($45M)", "Nanoprecise ($38M)"], nextRound: "Series B at $120-160M in 10-14 months", risks: "Customer concentration risk; slow industrial adoption curves" },
-  { name: "MateriFlow", stage: "Seed", revenue: "$290K MRR", growth: "240%", fairVal: "$35-48M", currentVal: "$38M", status: "fair", model: "B2B Marketplace", comps: ["Ula (ID Seed: $40M)", "Moglix (India: $42M early)", "Bizongo ($35M)"], nextRound: "Series A at $80-110M with GMV proof", risks: "Marketplace liquidity chicken-and-egg; margin pressure" },
-  { name: "Vybe", stage: "Pre-Seed", revenue: "$15K MRR", growth: "600%", fairVal: "$12-18M", currentVal: "$14M", status: "fair", model: "Creator Economy", comps: ["Chingari (Pre-Seed: $15M)", "Josh early ($18M)", "Kumu (PH: $10M)"], nextRound: "Seed at $30-45M on MAU trajectory", risks: "Hyper-competitive; user acquisition cost escalation; regulation risk" },
-  { name: "PixelPay", stage: "Pre-Seed", revenue: "$8K MRR", growth: "800%", fairVal: "$7-11M", currentVal: "$9M", status: "fair", model: "Gen-Z Fintech", comps: ["FamPay (Pre-Seed: $10M)", "Fidel early ($8M)", "Bankera ($6M)"], nextRound: "Seed at $20-30M on RBI license progress", risks: "Regulatory overhang; unclear willingness to pay from Gen-Z" },
-  { name: "RoboWeld", stage: "Series A", revenue: "$520K MRR", growth: "160%", fairVal: "$45-60M", currentVal: "$52M", status: "underpriced", model: "Industrial Robotics", comps: ["Universal Robots early ($60M)", "Doosan Robotics ($55M)", "Elephant Robotics ($38M)"], nextRound: "Series B at $130-170M with ASEAN expansion", risks: "Hardware supply chain complexity; after-sales service cost" },
-  { name: "GreenMill", stage: "Seed", revenue: "$240K MRR", growth: "210%", fairVal: "$40-55M", currentVal: "$42M", status: "underpriced", model: "Carbon/ESG SaaS", comps: ["Watershed ($45M seed)", "Persefoni ($50M)", "Plan A ($38M)"], nextRound: "Series A at $90-120M on regulatory tailwinds", risks: "ESG regulation pace uncertain in ASEAN; customer willingness to pay" }
-];
+const VALUATION_COMPS = [];  // Removed mock data
 
 // ---- Thesis Data ----
 const THESIS_DATA = {
@@ -448,6 +437,7 @@ async function init() {
   document.getElementById('filter-geo').addEventListener('change', (e) => { filters.geo = e.target.value; renderCurrentSection(); });
   document.getElementById('filter-sector').addEventListener('change', (e) => { filters.sector = e.target.value; renderCurrentSection(); });
   document.getElementById('filter-tier').addEventListener('change', (e) => { filters.tier = e.target.value; renderCurrentSection(); });
+  document.getElementById('filter-people').addEventListener('change', (e) => { filters.people = e.target.value; renderCurrentSection(); });
   document.getElementById('search-input').addEventListener('input', (e) => { filters.search = e.target.value.toLowerCase(); renderCurrentSection(); });
 
   // Modal close
@@ -567,6 +557,24 @@ function populateDynamicFilters() {
     });
     sectorSelect.value = currentVal;
   }
+
+  // Collect unique assignees (people)
+  const peopleSet = new Set();
+  streakDeals.forEach(d => {
+    try {
+      const assignees = JSON.parse(d.assigned_to || '[]');
+      assignees.forEach(a => { if (a.name) peopleSet.add(a.name); });
+    } catch { }
+  });
+  const peopleSelect = document.getElementById('filter-people');
+  if (peopleSelect) {
+    const currentVal = peopleSelect.value;
+    peopleSelect.innerHTML = '<option value="All">All People</option>';
+    [...peopleSet].sort().forEach(p => {
+      peopleSelect.innerHTML += `<option value="${p}">${p}</option>`;
+    });
+    peopleSelect.value = currentVal;
+  }
 }
 
 // ============================================================
@@ -607,11 +615,11 @@ const STREAK_STAGE_COLORS = {
 const ACTIVE_STAGE_KEYS = new Set(['5001', '5016', '5018', '5002', '5003', '5011', '5004', '5014', '5007', '5008', '5015']);
 
 const STREAK_INDUSTRY_MAP = {
-  '9001': 'Technology', '9002': 'HealthTech', '9003': 'EdTech', '9004': 'FinTech',
-  '9008': 'Education', '9009': 'E-commerce', '9011': 'Logistics', '9012': 'Media',
-  '9013': 'SaaS', '9016': 'Manufacturing', '9018': 'AgriTech', '9027': 'PropTech',
-  '9053': 'CleanTech', '9055': 'Consumer', '9058': 'Digital Media', '9063': 'Food Tech',
-  '9096': 'FinTech', '9197': 'B2B Software'
+  '9001': 'Consumer Tech', '9002': 'HealthTech', '9003': 'EdTech', '9004': 'FinTech',
+  '9008': 'EdTech', '9009': 'Consumer Brands', '9011': 'Logistics', '9012': 'Consumer Tech',
+  '9013': 'SaaS', '9016': 'Manufacturing', '9018': 'Manufacturing', '9027': 'Consumer Tech',
+  '9053': 'CleanTech', '9055': 'Consumer Brands', '9058': 'Consumer Tech', '9063': 'Consumer Brands',
+  '9096': 'FinTech', '9197': 'B2B'
 };
 const STREAK_COUNTRY_MAP = {
   '9001': '🇮🇳 India', '9002': '🇲🇾 Malaysia', '9003': '🇸🇬 Singapore',
@@ -625,21 +633,18 @@ function inferIndustry(d) {
     if (STREAK_INDUSTRY_MAP[code]) return STREAK_INDUSTRY_MAP[code];
   }
   const text = `${d.name || ''} ${d.description || ''}`.toLowerCase();
+  if (/fintech|payment|lending|loan|credit|banking|wallet|insurance|neobank|upi/.test(text)) return 'FinTech';
+  if (/saas|crm|erp|workflow|automation|devtool|developer|api|platform|analytics/.test(text)) return 'SaaS';
+  if (/b2b|enterprise|procurement|sourcing|supply|corporate/.test(text)) return 'B2B';
+  if (/manufactur|factory|industrial|robotics|hardware|iot|semiconductor/.test(text)) return 'Manufacturing';
+  if (/ecommerce|e-commerce|marketplace|retail|shop|d2c|brand|fmcg|cpg|food|restaurant|beverage|fashion|beauty|personal care/.test(text)) return 'Consumer Brands';
+  if (/\bai\b|artificial intelligence|\bml\b|machine learning|nlp|gpt|llm|deep learning/.test(text)) return 'AI/ML';
   if (/health|medic|clinic|pharma|hospital|doctor|therapy|diagnostics/.test(text)) return 'HealthTech';
-  if (/fintech|payment|lending|loan|credit|banking|wallet|insurance|neobank/.test(text)) return 'FinTech';
   if (/edu|learn|school|college|course|tutor|upskill/.test(text)) return 'EdTech';
-  if (/food|restaurant|delivery|chef|meal|kitchen|recipe/.test(text)) return 'Food Tech';
-  if (/logistic|supply chain|freight|shipping|transport|fleet/.test(text)) return 'Logistics';
-  if (/saas|crm|erp|b2b|enterprise|workflow/.test(text)) return 'SaaS/B2B';
-  if (/ecommerce|e-commerce|marketplace|retail|shop|d2c/.test(text)) return 'E-commerce';
-  if (/\bai\b|artificial intelligence|\bml\b|machine learning|nlp|gpt|llm/.test(text)) return 'AI/ML';
-  if (/climate|solar|renewable|green|carbon|cleantech/.test(text)) return 'CleanTech';
-  if (/real estate|proptech|property|housing|realty/.test(text)) return 'PropTech';
-  if (/agri|farm|crop|harvest|agriculture/.test(text)) return 'AgriTech';
-  if (/media|content|streaming|video|music|creator|entertainment/.test(text)) return 'Media';
-  if (/gaming|game|esport/.test(text)) return 'Gaming';
-  if (/cyber|security|fraud/.test(text)) return 'CyberSecurity';
-  return 'Technology';
+  if (/logistic|freight|shipping|transport|fleet|delivery|last.?mile/.test(text)) return 'Logistics';
+  if (/climate|solar|renewable|green|carbon|cleantech|ev|electric/.test(text)) return 'CleanTech';
+  if (/app|mobile|social|content|streaming|video|music|creator|gaming|media|entertainment|travel/.test(text)) return 'Consumer Tech';
+  return 'Other';
 }
 
 function inferCountry(d) {
@@ -748,6 +753,14 @@ function renderDealFlow(area) {
   }
   if (filters.sector !== 'All') {
     filtered = filtered.filter(d => d._industry === filters.sector);
+  }
+  if (filters.people !== 'All') {
+    filtered = filtered.filter(d => {
+      try {
+        const assignees = JSON.parse(d.assigned_to || '[]');
+        return assignees.some(a => a.name === filters.people);
+      } catch { return false; }
+    });
   }
 
   // Sort: urgent first, then by score desc
@@ -889,39 +902,45 @@ function renderStreakDealCard(d) {
   }
 
   return `
-    <div class="deal-card streak-deal-card animated-item" data-boxkey="${d.box_key}" style="border-left:3px solid ${stageColor};cursor:pointer">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
-        <div style="flex:1;min-width:0">
-          <div style="font-size:0.95rem;font-weight:700;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${name}</div>
-          <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">
-            <span style="font-size:0.65rem;padding:2px 7px;border-radius:10px;background:${stageColor}20;color:${stageColor};font-weight:600">${stageName}</span>
-            <span style="font-size:0.65rem;padding:2px 7px;border-radius:10px;background:var(--accent-purple)15;color:var(--accent-purple)">${industry}</span>
-            ${country ? `<span style="font-size:0.65rem;padding:2px 7px;border-radius:10px;background:var(--bg-tertiary);color:var(--text-muted)">${country}</span>` : ''}
+    <div class="deal-card streak-deal-card animated-item" data-boxkey="${d.box_key}" style="border-left:4px solid ${stageColor};cursor:pointer;display:flex;flex-direction:column;min-height:160px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+        <div style="flex:1;min-width:0;padding-right:12px">
+          <div style="font-size:1.15rem;font-weight:800;color:var(--text-primary);letter-spacing:-0.02em;margin-bottom:6px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${name}</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <span style="font-size:0.65rem;padding:3px 8px;border-radius:12px;background:${stageColor}15;color:${stageColor};font-weight:700">${stageName}</span>
+            <span style="font-size:0.65rem;padding:3px 8px;border-radius:12px;background:var(--accent-purple)15;color:var(--accent-purple);font-weight:600">${industry}</span>
+            ${country ? `<span style="font-size:0.65rem;padding:3px 8px;border-radius:12px;background:var(--bg-tertiary);color:var(--text-secondary);font-weight:600">${country}</span>` : ''}
             ${enrichBadge}
           </div>
         </div>
-        <div style="text-align:right;min-width:44px;margin-left:8px">
-          <div style="font-size:1.2rem;font-weight:800;color:${scoreColor}">${score}</div>
-          <div style="font-size:0.55rem;color:var(--text-muted)">SCORE</div>
+        <div style="text-align:right;min-width:50px;display:flex;flex-direction:column;align-items:flex-end">
+          <div style="font-size:1.4rem;font-family:'JetBrains Mono',monospace;font-weight:800;color:${scoreColor};line-height:1">${score}</div>
+          <div style="font-size:0.55rem;color:var(--text-muted);font-weight:700;letter-spacing:0.05em;margin-top:2px">SCORE</div>
         </div>
       </div>
+      
       ${enrichRow}
-      ${d.description ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:8px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${d.description}</div>` : ''}
-      <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">
-        ${d.funding_stage ? `<span style="font-size:0.65rem;padding:2px 7px;border-radius:10px;background:var(--accent-green)15;color:var(--accent-green)">${d.funding_stage}</span>` : ''}
-        <span style="font-size:0.65rem;padding:2px 7px;border-radius:10px;background:${fu.bg};color:${fu.color};font-weight:600">${fu.label}</span>
+      ${d.description ? `<div style="font-size:0.75rem;color:var(--text-secondary);line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;flex-grow:1;margin-bottom:12px">${d.description}</div>` : '<div style="flex-grow:1"></div>'}
+      
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+        ${d.funding_stage ? `<span style="font-size:0.65rem;padding:3px 8px;border-radius:12px;background:var(--accent-green)15;color:var(--accent-green);font-weight:600">${d.funding_stage}</span>` : ''}
+        <span style="font-size:0.65rem;padding:3px 8px;border-radius:12px;background:${fu.bg};color:${fu.color};font-weight:700">${fu.label}</span>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;padding-top:6px;border-top:1px solid var(--border-primary)">
+      
+      <div style="display:flex;justify-content:space-between;align-items:center;padding-top:10px;border-top:1px solid var(--border-primary);margin-top:auto">
         <div>
-          <div style="font-size:0.6rem;color:var(--text-muted)">Last contact</div>
-          <div style="font-size:0.72rem;font-weight:600;color:${lc.color}">${lc.text}</div>
+          <div style="font-size:0.6rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:2px">Last Contact</div>
+          <div style="font-size:0.75rem;font-weight:700;color:${lc.color}">${lc.text}</div>
         </div>
-        <div style="text-align:center">
-          <div style="font-size:0.6rem;color:var(--text-muted)">Emails</div>
-          <div style="font-size:0.72rem;color:var(--text-secondary)">↑${d.total_sent_emails || 0} ↓${d.total_received_emails || 0}</div>
+        <div style="text-align:center;background:var(--bg-tertiary);padding:4px 10px;border-radius:12px">
+          <div style="font-size:0.55rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:2px">Emails</div>
+          <div style="font-size:0.8rem;font-family:'JetBrains Mono',monospace;font-weight:700;color:var(--text-primary)">
+            <span style="color:var(--accent-green)">↑${d.total_sent_emails || 0}</span> 
+            <span style="color:var(--accent-blue);margin-left:4px">↓${d.total_received_emails || 0}</span>
+          </div>
         </div>
-        <div style="display:flex;gap:2px">
-          ${assignees.slice(0, 3).map(a => `<span title="${a.name || a.email}" style="width:22px;height:22px;border-radius:50%;background:var(--accent-blue);color:white;font-size:0.5rem;display:flex;align-items:center;justify-content:center;font-weight:700">${(a.name || 'U').split(' ').map(n => n[0]).join('').substring(0, 2)}</span>`).join('')}
+        <div style="display:flex;gap:3px;align-items:center">
+          ${assignees.slice(0, 3).map(a => `<span title="${a.name || a.email}" style="width:24px;height:24px;border-radius:50%;background:var(--accent-blue);color:white;font-size:0.6rem;display:flex;align-items:center;justify-content:center;font-weight:800;border:2px solid var(--bg-card)">${(a.name || 'U').split(' ').map(n => n[0]).join('').substring(0, 2)}</span>`).join('')}
         </div>
       </div>
     </div>`;
@@ -1315,36 +1334,7 @@ function closeModal() {
 // MODULE 8: Deck Analyzer
 // ============================================================
 
-const SAMPLE_DECKS = [
-  {
-    id: 'deck-001', name: 'FactoryOS - Series A Deck', company: 'FactoryOS', type: 'pdf', uploadDate: '2026-02-27',
-    ratings: { problem: 88, solution: 82, market: 90, team: 92, traction: 78, businessModel: 75, financials: 70, ask: 80 },
-    verdict: 'pass', verdictText: 'Strong deck — clear problem-solution fit, impressive team pedigree, and validated traction. Market sizing is well-researched. Financial projections need tighter unit economics. Recommend proceeding to partner meeting.',
-    strengths: ['Exceptional founder-market fit', 'Clear TAM/SAM/SOM breakdown', 'Customer testimonials from 3 enterprise logos'],
-    weaknesses: ['Unit economics slide lacks detail', 'Competitive moat section could be stronger']
-  },
-  {
-    id: 'deck-002', name: 'Playlo - Pre-Series A Deck', company: 'Playlo', type: 'ppt', uploadDate: '2026-02-26',
-    ratings: { problem: 72, solution: 85, market: 80, team: 78, traction: 92, businessModel: 68, financials: 60, ask: 72 },
-    verdict: 'review', verdictText: 'Compelling traction story with viral metrics. However, monetization strategy needs further diligence. Retention data is strong (D7: 38%) but D30 is missing. Request follow-up with deeper cohort analysis.',
-    strengths: ['Explosive growth metrics', 'Viral coefficient > 1.2', 'SEA gaming market timing is perfect'],
-    weaknesses: ['Monetization unclear — ARPU not defined', 'Missing D30 retention cohorts', 'Burn rate projection seems optimistic']
-  },
-  {
-    id: 'deck-003', name: 'GreenMill - Seed Extension', company: 'GreenMill', type: 'pdf', uploadDate: '2026-02-25',
-    ratings: { problem: 95, solution: 88, market: 92, team: 87, traction: 72, businessModel: 82, financials: 78, ask: 85 },
-    verdict: 'pass', verdictText: 'Excellent regulatory-driven thesis. EU CBAM creates forced buyer behavior — rare in B2B SaaS. Team has unique Shell background. Ask is reasonable for traction stage. Move to IC.',
-    strengths: ['Regulatory tailwind = forced adoption', 'Founder ran $500M sustainability budget at Shell', 'Land-and-expand model proven with 3 MNCs'],
-    weaknesses: ['ASEAN regulatory timeline uncertain', 'Customer willingness-to-pay needs validation beyond pilots']
-  },
-  {
-    id: 'deck-004', name: 'QuickServe - Seed Deck', company: 'QuickServe (New)', type: 'pdf', uploadDate: '2026-02-24',
-    ratings: { problem: 55, solution: 50, market: 60, team: 45, traction: 30, businessModel: 40, financials: 35, ask: 42 },
-    verdict: 'skip', verdictText: 'Crowded space with no clear differentiation. Team lacks relevant industry experience. Pre-revenue with aggressive valuation ask. Pass — recommend monitoring only if they demonstrate 3 months of traction.',
-    strengths: ['Large addressable market'],
-    weaknesses: ['No differentiation from 10+ competitors', 'First-time founders, no domain expertise', 'Pre-revenue asking $12M valuation', '$0 revenue, no LOIs']
-  }
-];
+const SAMPLE_DECKS = [];  // Removed — only real analyzed decks from Supabase shown
 
 function renderDeckAnalyzer(area) {
   // Merge: sample decks + Supabase saved decks + session uploads
@@ -1366,7 +1356,7 @@ function renderDeckAnalyzer(area) {
     weaknesses: sd.weaknesses || [],
     redFlags: sd.red_flags || []
   }));
-  const allDecks = [...savedDecks, ...uploadedDecks, ...SAMPLE_DECKS];
+  const allDecks = [...savedDecks, ...uploadedDecks];
   const total = allDecks.length;
   const passCount = allDecks.filter(d => d.verdict === 'pass').length;
   const reviewCount = allDecks.filter(d => d.verdict === 'review').length;
@@ -1610,71 +1600,74 @@ function renderDeckCard(d) {
     financials: 'Financials', ask: 'The Ask'
   };
   const avg = Math.round(Object.values(d.ratings).reduce((a, b) => a + b, 0) / 8);
-  const circumference = 2 * Math.PI * 22;
+  const circumference = 2 * Math.PI * 26; // Increased radius to 26
   const offset = circumference - (avg / 100) * circumference;
   const ringColor = avg >= 75 ? 'var(--accent-emerald)' : avg >= 55 ? 'var(--accent-amber)' : 'var(--accent-red)';
 
   return `
-    <div class="deck-card animated-item">
-      <div class="deck-card-header">
-        <div class="deck-card-icon ${d.type}">${d.type === 'pdf' ? '📕' : '📊'}</div>
-        <div>
-          <div class="deck-card-name">${d.name}</div>
-          <div class="deck-card-meta">
-            <span class="deal-tag">${d.company}</span>
-            <span class="deck-card-timestamp">${d.uploadDate}</span>
+    <div class="deck-card animated-item" style="padding:24px;border-radius:16px">
+      <div class="deck-card-header" style="margin-bottom:20px;align-items:flex-start">
+        <div class="deck-card-icon ${d.type}" style="width:48px;height:48px;font-size:1.6rem">${d.type === 'pdf' ? '📕' : '📊'}</div>
+        <div style="flex:1">
+          <div class="deck-card-name" style="font-size:1.25rem;font-weight:800;letter-spacing:-0.02em;margin-bottom:6px">${d.name}</div>
+          <div class="deck-card-meta" style="display:flex;gap:8px;align-items:center">
+            <span class="deal-tag" style="font-size:0.75rem;padding:4px 10px;background:var(--bg-tertiary);color:var(--text-primary)">${d.company}</span>
+            <span class="deck-card-timestamp" style="font-size:0.7rem;color:var(--text-muted)">${d.uploadDate}</span>
           </div>
         </div>
-        <div class="deck-overall-score">
-          <div class="score-ring">
-            <svg viewBox="0 0 48 48">
-              <circle class="bg" cx="24" cy="24" r="22" />
-              <circle class="progress" cx="24" cy="24" r="22"
+        <div class="deck-overall-score" style="display:flex;flex-direction:column;align-items:center">
+          <div class="score-ring" style="width:64px;height:64px">
+            <svg viewBox="0 0 64 64" style="width:64px;height:64px;transform:rotate(-90deg)">
+              <circle class="bg" cx="32" cy="32" r="26" style="fill:none;stroke:var(--border-medium);stroke-width:6" />
+              <circle class="progress" cx="32" cy="32" r="26"
                 stroke="${ringColor}"
+                stroke-width="6"
+                stroke-linecap="round"
+                fill="none"
                 stroke-dasharray="${circumference}"
-                stroke-dashoffset="${offset}" />
+                stroke-dashoffset="${offset}"
+                style="transition:stroke-dashoffset 1s ease-out" />
             </svg>
-            <div class="score-ring-value" style="color:${ringColor}">${avg}</div>
+            <div class="score-ring-value" style="color:${ringColor};font-size:1.3rem;font-weight:800;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)">${avg}</div>
           </div>
+          <div style="font-size:0.55rem;font-weight:700;letter-spacing:0.05em;color:var(--text-muted);margin-top:4px;text-transform:uppercase">Avg Score</div>
         </div>
       </div>
 
-      <div class="deck-ratings">
+      <div class="deck-ratings" style="display:grid;grid-template-columns:1fr 1fr;column-gap:24px;row-gap:8px;margin-bottom:20px">
         ${Object.entries(d.ratings).map(([key, val]) => `
-          <div class="deck-rating-row">
-            <div class="deck-rating-label">${ratingLabels[key]}</div>
-            <div class="deck-rating-bar"><div class="deck-rating-bar-fill" style="width:${val}%;background:${getBarColor(val)}"></div></div>
-            <div class="deck-rating-val" style="color:${getBarColor(val)}">${val}</div>
+          <div class="deck-rating-row" style="display:flex;align-items:center;gap:12px">
+            <div class="deck-rating-label" style="width:80px;font-size:0.75rem;font-weight:600;color:var(--text-secondary)">${ratingLabels[key]}</div>
+            <div class="deck-rating-bar" style="flex:1;height:6px;background:var(--bg-tertiary);border-radius:3px;overflow:hidden"><div class="deck-rating-bar-fill" style="height:100%;width:${val}%;background:${getBarColor(val)};border-radius:3px"></div></div>
+            <div class="deck-rating-val" style="width:24px;text-align:right;font-size:0.75rem;font-weight:700;font-family:'JetBrains Mono',monospace;color:${getBarColor(val)}">${val}</div>
           </div>
         `).join('')}
       </div>
 
-      <div class="deck-verdict ${d.verdict}">
-        <strong>${d.verdict === 'pass' ? '✅ PASS — Move to IC' : d.verdict === 'review' ? '🔍 REVIEW — Needs Follow-up' : '❌ SKIP — Does Not Meet Criteria'}</strong><br>
-        ${d.verdictText}
+      <div class="deck-verdict ${d.verdict}" style="padding:14px;border-radius:12px;margin-bottom:16px;background:${d.verdict === 'pass' ? 'rgba(16,185,129,0.1)' : d.verdict === 'review' ? 'rgba(245,158,11,0.1)' : 'rgba(239,68,68,0.1)'};border:1px solid ${d.verdict === 'pass' ? 'rgba(16,185,129,0.2)' : d.verdict === 'review' ? 'rgba(245,158,11,0.2)' : 'rgba(239,68,68,0.2)'}">
+        <div style="font-weight:800;margin-bottom:6px;color:${d.verdict === 'pass' ? 'var(--accent-emerald)' : d.verdict === 'review' ? 'var(--accent-amber)' : '#ef4444'}">${d.verdict === 'pass' ? '✅ PASS — Move to IC' : d.verdict === 'review' ? '🔍 REVIEW — Needs Follow-up' : '❌ SKIP — Does Not Meet Criteria'}</div>
+        <div style="font-size:0.8rem;line-height:1.5;color:var(--text-primary)">${d.verdictText}</div>
       </div>
 
-      ${d.strengths ? `
-        <div style="margin-top:10px;font-size:0.75rem">
-          <span style="color:var(--accent-emerald);font-weight:700">Strengths:</span>
-          <span style="color:var(--text-secondary)">${d.strengths.join(' · ')}</span>
+      ${d.strengths && d.strengths.length > 0 ? `
+        <div style="margin-bottom:8px;font-size:0.8rem">
+          <span style="color:var(--accent-emerald);font-weight:800">✅ Strengths:</span>
+          <span style="color:var(--text-secondary)">${d.strengths.join(' • ')}</span>
         </div>` : ''}
-      ${d.weaknesses ? `
-        <div style="margin-top:4px;font-size:0.75rem">
-          <span style="color:var(--accent-amber);font-weight:700">Weaknesses:</span>
-          <span style="color:var(--text-secondary)">${d.weaknesses.join(' · ')}</span>
+      ${d.weaknesses && d.weaknesses.length > 0 ? `
+        <div style="margin-bottom:8px;font-size:0.8rem">
+          <span style="color:var(--accent-amber);font-weight:800">⚠️ Weaknesses:</span>
+          <span style="color:var(--text-secondary)">${d.weaknesses.join(' • ')}</span>
         </div>` : ''}
-
       ${(d.redFlags && d.redFlags.length > 0) ? `
-        <div style="margin-top:6px;font-size:0.75rem">
-          <span style="color:#ef4444;font-weight:700">🚩 Red Flags:</span>
-          <span style="color:#ef4444">${d.redFlags.join(' · ')}</span>
+        <div style="margin-bottom:16px;font-size:0.8rem;padding:10px;background:rgba(239,68,68,0.05);border-radius:8px;border-left:3px solid #ef4444">
+          <span style="color:#ef4444;font-weight:800">🚩 Red Flags:</span>
+          <span style="color:var(--text-primary);font-weight:600;margin-left:4px">${d.redFlags.join(' • ')}</span>
         </div>` : ''}
 
-      <div class="deck-action-btns">
-        <button class="deck-action-btn primary">📋 Add to Pipeline</button>
-        <button class="deck-action-btn">💬 Share with Team</button>
-        <button class="deck-action-btn">📥 Download Report</button>
+      <div class="deck-action-btns" style="display:flex;gap:10px;margin-top:20px;padding-top:16px;border-top:1px solid var(--border-subtle)">
+        <button class="deck-action-btn primary" style="padding:8px 16px;font-size:0.8rem;font-weight:700">📋 Add to Pipeline</button>
+        <button class="deck-action-btn" style="padding:8px 16px;font-size:0.8rem;font-weight:600">💬 Share Analysis</button>
       </div>
     </div>
   `;
@@ -1725,41 +1718,34 @@ function renderValuation(area) {
             </div>
             <div style="margin-top:12px;display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
               <div>
-                <div class="stat-label">Revenue</div>
-                <div style="font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--accent-emerald)">${v.revenue}</div>
-              </div>
-              <div>
-                <div class="stat-label">Growth</div>
-                <div style="font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--accent-amber)">${v.growth}</div>
-              </div>
-              <div>
-                <div class="stat-label">Fair Valuation</div>
-                <div style="font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--accent-blue)">${v.fairVal}</div>
-              </div>
-              <div>
-                <div class="stat-label">Current Valuation</div>
-                <div style="font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--text-primary)">${v.currentVal}</div>
-              </div>
+        <tr class="animated-item" style="animation-delay:${i * 0.05}s">
+          <td style="font-weight:700">
+            ${v.name}<br>
+      ${VALUATION_COMPS.map((v, i) => `
+        <tr class="animated-item" style="animation-delay:${i * 0.05}s">
+          <td style="font-weight:700">
+            ${v.name}<br>
+            <span style="font-size:0.65rem;color:var(--text-tertiary);font-weight:400">${v.model}</span>
+          </td>
+          <td><span style="font-size:0.7rem;padding:3px 8px;border-radius:12px;background:var(--bg-tertiary)">${v.stage}</span></td>
+          <td style="font-family:'JetBrains Mono',monospace">${v.revenue}</td>
+          <td style="color:var(--accent-emerald);font-weight:700">${v.growth}</td>
+          <td style="font-family:'JetBrains Mono',monospace;color:var(--text-primary);font-weight:600">${v.fairVal}</td>
+          <td>
+            <div style="font-family:'JetBrains Mono',monospace;font-weight:700;display:flex;align-items:center;gap:6px">
+              ${v.currentVal}
+              ${v.status === 'overpriced' ? '<span style="color:#ef4444;font-size:0.8rem" title="Overpriced">🔴</span>' :
+      v.status === 'underpriced' ? '<span style="color:#10b981;font-size:0.8rem" title="Attractively Priced">🟢</span>' :
+        '<span style="color:#3b82f6;font-size:0.8rem" title="Fairly Priced">🔵</span>'}
             </div>
-            <div style="margin-top:12px">
-              <div class="stat-label" style="margin-bottom:6px">Comparable Deals</div>
-              <div style="display:flex;gap:6px;flex-wrap:wrap">
-                ${v.comps.map(c => `<span class="deal-tag">${c}</span>`).join('')}
-              </div>
-            </div>
-            <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
-              <div>
-                <div class="stat-label" style="margin-bottom:4px">Next Round Potential</div>
-                <div style="font-size:0.8rem;color:var(--accent-emerald);line-height:1.4">${v.nextRound}</div>
-              </div>
-              <div>
-                <div class="stat-label" style="margin-bottom:4px">Risks VCs May Ignore</div>
-                <div style="font-size:0.8rem;color:var(--accent-amber);line-height:1.4">${v.risks}</div>
-              </div>
-            </div>
-          </div>
-        </div>
+          </td>
+          <td style="font-size:0.7rem;color:var(--text-secondary);max-width:200px;line-height:1.4">${v.comps.join('<br>')}</td>
+          <td style="font-size:0.7rem;color:var(--text-secondary);max-width:200px;line-height:1.4">${v.risks}</td>
+        </tr>
       `).join('')}
+        </tbody>
+      </table>
+      `}
     </div>
   `;
 }
@@ -1835,7 +1821,7 @@ function renderThesis(area) {
         </div>
       `).join('')}
     </div>
-  `;
+`;
 }
 
 // ============================================================
@@ -1947,8 +1933,9 @@ function renderPortfolio(area) {
       <div class="section-title">👀 Watching / Too Early</div>
       <div class="section-subtitle">${watching.length} companies in tracking stages</div>
     </div>
-    <div class="deal-grid">${watching.map(d => renderStreakDealCard(d)).join('')}</div>` : ''}
-  `;
+    <div class="deal-grid">${watching.map(d => renderStreakDealCard(d)).join('')}</div>` : ''
+    }
+`;
 }
 
 // ============================================================
@@ -1977,7 +1964,7 @@ function renderPowerMoves(area) {
     .slice(0, 20)
     .map(n => ({
       type: (n.type || 'general').replace(/_/g, ' '),
-      title: n.company ? `${n.company}: ${n.title}` : n.title,
+      title: n.company ? `${n.company}: ${n.title} ` : n.title,
       desc: n.summary || n.ai_summary || '',
       implication: n.implication || '',
       time: n.published_at ? new Date(n.published_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '',
@@ -2001,7 +1988,7 @@ function renderPowerMoves(area) {
         type: 'Urgent Deal', rawType: 'Urgent Deal',
         title: `${name} — Urgent Tracking`,
         desc: d.description ? d.description.substring(0, 200) : 'Marked urgent in Streak CRM.',
-        implication: `🚨 Immediate follow-up required. ${d.total_sent_emails || 0} emails sent, ${d.total_received_emails || 0} received.`,
+        implication: `🚨 Immediate follow - up required.${d.total_sent_emails || 0} emails sent, ${d.total_received_emails || 0} received.`,
         time: formatLastContact(d.last_email_timestamp).text
       });
     });
@@ -2012,7 +1999,7 @@ function renderPowerMoves(area) {
         type: 'IC Candidate', rawType: 'IC Candidate',
         title: `${name} — IC Process Active`,
         desc: d.description ? d.description.substring(0, 200) : 'In IC review stage.',
-        implication: `💼 Investment committee evaluation underway. ${(d.total_sent_emails || 0) + (d.total_received_emails || 0)} total email interactions.`,
+        implication: `💼 Investment committee evaluation underway.${(d.total_sent_emails || 0) + (d.total_received_emails || 0)} total email interactions.`,
         time: formatLastContact(d.last_email_timestamp).text
       });
     });
@@ -2022,7 +2009,7 @@ function renderPowerMoves(area) {
       const stageName = STREAK_STAGE_NAMES[d.stage_key] || d.stage_key;
       powerItems.push({
         type: 'Deal Activity', rawType: 'Deal Activity',
-        title: `${name} — Active at ${stageName}`,
+        title: `${name} — Active at ${stageName} `,
         desc: d.description ? d.description.substring(0, 200) : `Stage: ${stageName}.`,
         implication: `📧 ${d.total_sent_emails || 0} sent, ${d.total_received_emails || 0} received.`,
         time: formatLastContact(d.last_email_timestamp).text
@@ -2031,10 +2018,10 @@ function renderPowerMoves(area) {
   }
 
   area.innerHTML = `
-    <div class="insight-box info">
+  < div class="insight-box info" >
       <span class="insight-emoji">🕵️</span>
       <strong>Intelligence Feed:</strong> ${powerItems.length} signals from ${signals.length ? 'news monitoring + Streak CRM' : 'Streak CRM deal activity'}. ${signals.length ? 'Auto-updated daily via n8n.' : 'Add n8n news workflow for external signals (ET, VCCircle, Inc42).'}
-    </div>
+    </div >
 
     <div class="section-title-row" style="margin-top:20px">
       <div class="section-title">Network Intelligence Feed</div>
@@ -2060,7 +2047,7 @@ function renderPowerMoves(area) {
           <p>Import the n8n_news_workflow.json into your n8n instance to start receiving daily VC intelligence signals from Economic Times, VCCircle, Inc42, and more.</p>
         </div>`}
     </div>
-  `;
+`;
 }
 
 // ============================================================
@@ -2113,7 +2100,7 @@ function renderPatterns(area) {
         </div>
       `).join('')}
     </div>
-  `;
+`;
 }
 
 // ============================================================
@@ -2124,11 +2111,11 @@ function renderPatterns(area) {
 async function renderBriefing(area) {
   // Show loading state
   area.innerHTML = `
-    <div style="padding:60px 20px; text-align:center; color:var(--text-secondary)">
+  < div style = "padding:60px 20px; text-align:center; color:var(--text-secondary)" >
       <div style="font-size:3rem; margin-bottom:16px; animation: pulse 2s infinite">🗞️</div>
       <h3 style="font-family:Inter; font-weight:600; font-size:1.2rem; color:var(--text-primary); margin-bottom:8px">Compiling Today's Intelligence...</h3>
       <p style="font-size:0.9rem">Fetching signals, funding rounds, and ecosystem news</p>
-    </div>
+    </div >
   `;
 
   let latestBriefing = null;
@@ -2168,20 +2155,20 @@ async function renderBriefing(area) {
     md = md.replace(/\n/g, ''); // Clean remaining newlines to prevent weird gaps
 
     area.innerHTML = `
-      <div class="briefing-container">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 24px;">
-          <div class="briefing-date">📅 ${briefDate} · Auto-generated via AI</div>
-          <div style="font-size:0.75rem; color:var(--text-tertiary)">Sources: ${sources.join(', ') || 'Various'}</div>
-        </div>
+  < div class="briefing-container" >
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 24px;">
+      <div class="briefing-date">📅 ${briefDate} · Auto-generated via AI</div>
+      <div style="font-size:0.75rem; color:var(--text-tertiary)">Sources: ${sources.join(', ') || 'Various'}</div>
+    </div>
         ${md}
-      </div>
-    `;
+      </div >
+  `;
     return;
   }
 
   // Fallback to static demo content if no DB record found
   area.innerHTML = `
-    <div class="briefing-container">
+  < div class="briefing-container" >
       <div class="briefing-date">📅 ${dateStr} · 5 min read</div>
 
       <div class="briefing-section">
@@ -2231,7 +2218,7 @@ async function renderBriefing(area) {
           <div class="briefing-item-body">While VCs pile into pure software plays, RoboWeld and PackBot combine hardware + AI software at 70% gross margins. Hardware creates lock-in that software alone can't achieve. Chinese competitors can't replicate the local field service network. This is the Fanuc/Keyence playbook, not the Salesforce one. JV should double down here while others look away.</div>
         </div>
       </div>
-    </div>
+    </div >
   `;
 }
 
@@ -2245,7 +2232,7 @@ function renderIntegrations(area) {
   const now = new Date().toLocaleTimeString('en-US', { hour12: false });
 
   area.innerHTML = `
-    <div class="stats-bar">
+  < div class="stats-bar" >
       <div class="stat-card">
         <div class="stat-label">Integrations</div>
         <div class="stat-value emerald">4</div>
@@ -2262,24 +2249,24 @@ function renderIntegrations(area) {
         <div class="stat-label">Sync Status</div>
         <div class="stat-value ${supabaseStatus === 'connected' ? 'emerald' : 'orange'}">${supabaseStatus === 'connected' ? 'Live' : 'Offline'}</div>
       </div>
-    </div>
+    </div >
 
-    <div class="integrations-grid">
+  <div class="integrations-grid">
 
-      <!-- Supabase -->
-      <div class="integration-card animated-item">
-        <div class="integration-card-header">
-          <div class="integration-logo supabase">🔋</div>
-          <div>
-            <div class="integration-name">Supabase</div>
-            <div class="integration-desc">Real-time database & collaboration backend</div>
-          </div>
-          <div class="integration-status ${supabaseStatus}">
-            <span>●</span> ${supabaseStatus === 'connected' ? 'Connected' : 'Disconnected'}
-          </div>
+    <!-- Supabase -->
+    <div class="integration-card animated-item">
+      <div class="integration-card-header">
+        <div class="integration-logo supabase">🔋</div>
+        <div>
+          <div class="integration-name">Supabase</div>
+          <div class="integration-desc">Real-time database & collaboration backend</div>
         </div>
-        <div class="integration-body">
-          ${integrationState.supabase.connected ? `
+        <div class="integration-status ${supabaseStatus}">
+          <span>●</span> ${supabaseStatus === 'connected' ? 'Connected' : 'Disconnected'}
+        </div>
+      </div>
+      <div class="integration-body">
+        ${integrationState.supabase.connected ? `
             <div class="sync-log">
               <div class="sync-log-entry"><span class="sync-log-time">${now}</span> <span class="sync-log-ok">✓ Connected to Supabase</span></div>
               <div class="sync-log-entry"><span class="sync-log-time">${now}</span> <span class="sync-log-ok">✓ Project: vtxuzrkwnyhxciohwjjx</span></div>
@@ -2295,29 +2282,29 @@ function renderIntegrations(area) {
               <button class="integration-connect-btn" id="connect-supabase">Connect</button>
             </div>
           `}
-          <div class="integration-features">
-            <div class="integration-feature"><span class="integration-feature-icon">✅</span> Store deals, decks, and theses in cloud</div>
-            <div class="integration-feature"><span class="integration-feature-icon">✅</span> Real-time collaboration with team</div>
-            <div class="integration-feature"><span class="integration-feature-icon">✅</span> Access from any device / browser</div>
-            <div class="integration-feature"><span class="integration-feature-icon">✅</span> Automatic backups & version history</div>
-          </div>
+        <div class="integration-features">
+          <div class="integration-feature"><span class="integration-feature-icon">✅</span> Store deals, decks, and theses in cloud</div>
+          <div class="integration-feature"><span class="integration-feature-icon">✅</span> Real-time collaboration with team</div>
+          <div class="integration-feature"><span class="integration-feature-icon">✅</span> Access from any device / browser</div>
+          <div class="integration-feature"><span class="integration-feature-icon">✅</span> Automatic backups & version history</div>
         </div>
       </div>
+    </div>
 
-      <!-- Gmail -->
-      <div class="integration-card animated-item">
-        <div class="integration-card-header">
-          <div class="integration-logo gmail">📧</div>
-          <div>
-            <div class="integration-name">Gmail</div>
-            <div class="integration-desc">Auto-scan deal emails & founder intros</div>
-          </div>
-          <div class="integration-status ${gmailStatus}">
-            <span>●</span> ${gmailStatus === 'connected' ? 'Connected' : 'Not Connected'}
-          </div>
+    <!-- Gmail -->
+    <div class="integration-card animated-item">
+      <div class="integration-card-header">
+        <div class="integration-logo gmail">📧</div>
+        <div>
+          <div class="integration-name">Gmail</div>
+          <div class="integration-desc">Auto-scan deal emails & founder intros</div>
         </div>
-        <div class="integration-body">
-          ${integrationState.gmail.connected ? `
+        <div class="integration-status ${gmailStatus}">
+          <span>●</span> ${gmailStatus === 'connected' ? 'Connected' : 'Not Connected'}
+        </div>
+      </div>
+      <div class="integration-body">
+        ${integrationState.gmail.connected ? `
             <div class="insight-box positive" style="margin:0">Connected as <strong>${integrationState.gmail.email}</strong></div>
             ${integrationState.gmail.emails.length > 0 ? `
               <div class="sync-log" style="max-height:180px">
@@ -2343,29 +2330,29 @@ function renderIntegrations(area) {
               Click to set up Google OAuth · Steps will guide you through it
             </div>
           `}
-          <div class="integration-features">
-            <div class="integration-feature"><span class="integration-feature-icon">📥</span> Auto-detect deal mails from founders</div>
-            <div class="integration-feature"><span class="integration-feature-icon">🏷️</span> Tag emails by startup in pipeline</div>
-            <div class="integration-feature"><span class="integration-feature-icon">📊</span> Deal inbox with email thread summary</div>
-            <div class="integration-feature"><span class="integration-feature-icon">🔔</span> Alerts for warm intro replies</div>
-          </div>
+        <div class="integration-features">
+          <div class="integration-feature"><span class="integration-feature-icon">📥</span> Auto-detect deal mails from founders</div>
+          <div class="integration-feature"><span class="integration-feature-icon">🏷️</span> Tag emails by startup in pipeline</div>
+          <div class="integration-feature"><span class="integration-feature-icon">📊</span> Deal inbox with email thread summary</div>
+          <div class="integration-feature"><span class="integration-feature-icon">🔔</span> Alerts for warm intro replies</div>
         </div>
       </div>
+    </div>
 
-      <!-- Streak CRM -->
-      <div class="integration-card animated-item">
-        <div class="integration-card-header">
-          <div class="integration-logo streak">🔥</div>
-          <div>
-            <div class="integration-name">Streak CRM</div>
-            <div class="integration-desc">Sync deal pipeline with Gmail CRM</div>
-          </div>
-          <div class="integration-status ${streakStatus}">
-            <span>●</span> ${streakStatus === 'connected' ? 'Connected' : 'Not Connected'}
-          </div>
+    <!-- Streak CRM -->
+    <div class="integration-card animated-item">
+      <div class="integration-card-header">
+        <div class="integration-logo streak">🔥</div>
+        <div>
+          <div class="integration-name">Streak CRM</div>
+          <div class="integration-desc">Sync deal pipeline with Gmail CRM</div>
         </div>
-        <div class="integration-body">
-          ${integrationState.streak.connected ? `
+        <div class="integration-status ${streakStatus}">
+          <span>●</span> ${streakStatus === 'connected' ? 'Connected' : 'Not Connected'}
+        </div>
+      </div>
+      <div class="integration-body">
+        ${integrationState.streak.connected ? `
             <div class="insight-box positive" style="margin:0">✅ Syncing with Streak CRM — API key configured</div>
             <div class="sync-log">
               <div class="sync-log-entry"><span class="sync-log-time">${now}</span> <span class="sync-log-ok">✓ API key validated: strk_...BiAx</span></div>
@@ -2381,30 +2368,30 @@ function renderIntegrations(area) {
               <button class="integration-connect-btn streak-btn" id="connect-streak">Connect</button>
             </div>
           `}
-          <div class="integration-features">
-            <div class="integration-feature"><span class="integration-feature-icon">🔄</span> Two-way deal sync with Streak pipelines</div>
-            <div class="integration-feature"><span class="integration-feature-icon">📋</span> Map Streak stages to JV tiers (Hot/Warm/Watch)</div>
-            <div class="integration-feature"><span class="integration-feature-icon">📧</span> Link email threads to deal cards</div>
-            <div class="integration-feature"><span class="integration-feature-icon">📊</span> Pull Streak deal notes into platform</div>
-          </div>
+        <div class="integration-features">
+          <div class="integration-feature"><span class="integration-feature-icon">🔄</span> Two-way deal sync with Streak pipelines</div>
+          <div class="integration-feature"><span class="integration-feature-icon">📋</span> Map Streak stages to JV tiers (Hot/Warm/Watch)</div>
+          <div class="integration-feature"><span class="integration-feature-icon">📧</span> Link email threads to deal cards</div>
+          <div class="integration-feature"><span class="integration-feature-icon">📊</span> Pull Streak deal notes into platform</div>
         </div>
       </div>
+    </div>
 
-      <!-- Team Collaboration -->
-      <div class="integration-card animated-item">
-        <div class="integration-card-header">
-          <div class="integration-logo team">👥</div>
-          <div>
-            <div class="integration-name">Team</div>
-            <div class="integration-desc">Collaborate and share the dashboard</div>
-          </div>
-          <div class="integration-status connected">
-            <span>●</span> ${integrationState.team.members.length} members
-          </div>
+    <!-- Team Collaboration -->
+    <div class="integration-card animated-item">
+      <div class="integration-card-header">
+        <div class="integration-logo team">👥</div>
+        <div>
+          <div class="integration-name">Team</div>
+          <div class="integration-desc">Collaborate and share the dashboard</div>
         </div>
-        <div class="integration-body">
-          <div class="team-grid">
-            ${integrationState.team.members.map(m => `
+        <div class="integration-status connected">
+          <span>●</span> ${integrationState.team.members.length} members
+        </div>
+      </div>
+      <div class="integration-body">
+        <div class="team-grid">
+          ${integrationState.team.members.map(m => `
               <div class="team-member-card">
                 <div class="team-avatar" style="background:${m.color}">${m.name.split(' ').map(n => n[0]).join('')}</div>
                 <div>
@@ -2413,9 +2400,9 @@ function renderIntegrations(area) {
                 </div>
               </div>
             `).join('')}
-          </div>
-          <div class="team-invite-form">
-            <input class="integration-input" placeholder="Email address" id="invite-email">
+        </div>
+        <div class="team-invite-form">
+          <input class="integration-input" placeholder="Email address" id="invite-email">
             <select class="integration-input" id="invite-role" style="flex:0 0 120px">
               <option>Partner</option>
               <option>Analyst</option>
@@ -2423,18 +2410,18 @@ function renderIntegrations(area) {
               <option>Viewer</option>
             </select>
             <button class="integration-connect-btn" id="invite-btn">Invite</button>
-          </div>
-          <div class="integration-features" style="margin-top:14px">
-            <div class="integration-feature"><span class="integration-feature-icon">🌐</span> Share via link — accessible from any browser</div>
-            <div class="integration-feature"><span class="integration-feature-icon">🔒</span> Role-based access: Partner, Analyst, Viewer</div>
-            <div class="integration-feature"><span class="integration-feature-icon">💬</span> Shared annotations on deals and decks</div>
-            <div class="integration-feature"><span class="integration-feature-icon">🔔</span> Activity feed of team actions</div>
-          </div>
+        </div>
+        <div class="integration-features" style="margin-top:14px">
+          <div class="integration-feature"><span class="integration-feature-icon">🌐</span> Share via link — accessible from any browser</div>
+          <div class="integration-feature"><span class="integration-feature-icon">🔒</span> Role-based access: Partner, Analyst, Viewer</div>
+          <div class="integration-feature"><span class="integration-feature-icon">💬</span> Shared annotations on deals and decks</div>
+          <div class="integration-feature"><span class="integration-feature-icon">🔔</span> Activity feed of team actions</div>
         </div>
       </div>
-
     </div>
-  `;
+
+  </div>
+`;
 
   // Bind events
   document.getElementById('connect-gmail')?.addEventListener('click', () => {
@@ -2495,9 +2482,9 @@ const IC_OBJECTIONS = {
 };
 
 const TALKING_POINTS_TEMPLATES = [
-  { label: 'Market Timing', template: (s) => `${s.name} is entering the ${s.subSector} market at an inflection point — ${s.geography} \$${s.tam}${s.tamUnit} TAM with only ${s.stage}-stage competition.` },
-  { label: 'Founder Signal', template: (s) => `${s.founders[0].name} (${s.founders[0].pedigree.split(',')[0]}) brings rare combination of domain + execution. ${s.founders.length > 1 ? s.founders[1].name + ' complements on tech side.' : ''}` },
-  { label: 'Traction Quality', template: (s) => `${s.metrics.mauGrowth}% MoM growth to ${s.metrics.mau > 1000 ? (s.metrics.mau / 1000).toFixed(0) + 'K' : s.metrics.mau} MAU. Revenue at \$${s.metrics.revenue > 1000 ? (s.metrics.revenue / 1000).toFixed(0) + 'K' : s.metrics.revenue}/mo growing ${s.metrics.revenueGrowth}% MoM.` },
+  { label: 'Market Timing', template: (s) => `${s.name} is entering the ${s.subSector} market at an inflection point — ${s.geography} \$${s.tam}${s.tamUnit} TAM with only ${s.stage} -stage competition.` },
+  { label: 'Founder Signal', template: (s) => `${s.founders[0].name} (${s.founders[0].pedigree.split(',')[0]}) brings rare combination of domain + execution.${s.founders.length > 1 ? s.founders[1].name + ' complements on tech side.' : ''} ` },
+  { label: 'Traction Quality', template: (s) => `${s.metrics.mauGrowth}% MoM growth to ${s.metrics.mau > 1000 ? (s.metrics.mau / 1000).toFixed(0) + 'K' : s.metrics.mau} MAU.Revenue at \$${s.metrics.revenue > 1000 ? (s.metrics.revenue / 1000).toFixed(0) + 'K' : s.metrics.revenue}/mo growing ${s.metrics.revenueGrowth}% MoM.` },
   { label: 'Capital Efficiency', template: (s) => `Burning \$${(s.metrics.burnRate / 1000).toFixed(0)}K/mo with ${s.metrics.runway}mo runway. Last round: \$${s.lastRound.amount}M ${s.lastRound.type} — valuation implies ${(s.lastRound.amount / (s.metrics.revenue * 12 / 1000000) || 0).toFixed(0)}x revenue multiple.` },
   { label: 'Competitive Edge', template: (s) => `Key differentiation in ${s.subSector}: ${s.signals.founderExit.detail}. Hiring signal: ${s.signals.hiringSpike.detail}.` },
   { label: 'IC Ask', template: (s) => `Recommendation: ${s.scores ? (s.scores.composite > 75 ? 'Strong conviction — proceed to term sheet.' : s.scores.composite > 60 ? 'Positive lean — schedule deep dive with founders.' : 'Monitor — revisit in 3 months.') : 'Evaluate scoring data.'}` }
