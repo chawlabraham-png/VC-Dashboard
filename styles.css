@@ -1534,6 +1534,21 @@ body {
   }
 }
 
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spin-animation {
+  display: inline-block;
+  animation: spin 1.5s linear infinite;
+}
+
 .animated-item {
   animation: fadeInUp 0.4s var(--ease-out) both;
 }

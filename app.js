@@ -118,6 +118,23 @@ async function initSupabase() {
         console.warn('deal_enrichments fetch skipped:', e4.message);
       }
 
+      // Fetch previously analyzed decks
+      try {
+        const { data: deckData, error: deckErr } = await supabaseClient
+          .from('deck_analyses')
+          .select('*')
+          .order('created_at', { ascending: false });
+        if (!deckErr && deckData && deckData.length > 0) {
+          window._savedDecks = deckData;
+          console.log(`✅ Loaded ${deckData.length} analyzed decks`);
+        } else {
+          window._savedDecks = [];
+        }
+      } catch (e5) {
+        window._savedDecks = [];
+        console.warn('deck_analyses fetch skipped:', e5.message);
+      }
+
       return startupsData;
     }
   } catch (e) {
@@ -407,7 +424,10 @@ async function init() {
   // Set date
   const now = new Date();
   document.getElementById('report-date').textContent = now.toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
-  document.getElementById('deal-count-badge').textContent = rankedStartups.length;
+  document.getElementById('deal-count-badge').textContent = streakDeals.length || rankedStartups.length;
+
+  // Dynamic filter population from live Streak data
+  populateDynamicFilters();
 
   // Log integration status
   if (streakDeals.length > 0) {
@@ -511,6 +531,45 @@ function renderCurrentSection() {
 }
 
 // ============================================================
+// Dynamic Filter Population (from live Streak data)
+// ============================================================
+function populateDynamicFilters() {
+  if (!streakDeals.length) return;
+
+  // Collect unique geos
+  const geoSet = new Set();
+  streakDeals.forEach(d => {
+    const country = inferCountry(d);
+    if (country) geoSet.add(country);
+  });
+  const geoSelect = document.getElementById('filter-geo');
+  if (geoSelect) {
+    const currentVal = geoSelect.value;
+    geoSelect.innerHTML = '<option value="All">All Geographies</option>';
+    [...geoSet].sort().forEach(g => {
+      geoSelect.innerHTML += `<option value="${g}">${g}</option>`;
+    });
+    geoSelect.value = currentVal;
+  }
+
+  // Collect unique industries
+  const sectorSet = new Set();
+  streakDeals.forEach(d => {
+    const ind = inferIndustry(d);
+    if (ind) sectorSet.add(ind);
+  });
+  const sectorSelect = document.getElementById('filter-sector');
+  if (sectorSelect) {
+    const currentVal = sectorSelect.value;
+    sectorSelect.innerHTML = '<option value="All">All Sectors</option>';
+    [...sectorSet].sort().forEach(s => {
+      sectorSelect.innerHTML += `<option value="${s}">${s}</option>`;
+    });
+    sectorSelect.value = currentVal;
+  }
+}
+
+// ============================================================
 // MODULE 1: Deal Flow
 // ============================================================
 function getFilteredStartups() {
@@ -545,19 +604,19 @@ const STREAK_STAGE_COLORS = {
   '5008': '#3b82f6', '5015': '#6735BA', '5009': '#9915AF',
   '5006': '#7d25b5', '5017': '#D81A60'
 };
-const ACTIVE_STAGE_KEYS = new Set(['5001','5016','5018','5002','5003','5011','5004','5014','5007','5008','5015']);
+const ACTIVE_STAGE_KEYS = new Set(['5001', '5016', '5018', '5002', '5003', '5011', '5004', '5014', '5007', '5008', '5015']);
 
 const STREAK_INDUSTRY_MAP = {
-  '9001':'Technology','9002':'HealthTech','9003':'EdTech','9004':'FinTech',
-  '9008':'Education','9009':'E-commerce','9011':'Logistics','9012':'Media',
-  '9013':'SaaS','9016':'Manufacturing','9018':'AgriTech','9027':'PropTech',
-  '9053':'CleanTech','9055':'Consumer','9058':'Digital Media','9063':'Food Tech',
-  '9096':'FinTech','9197':'B2B Software'
+  '9001': 'Technology', '9002': 'HealthTech', '9003': 'EdTech', '9004': 'FinTech',
+  '9008': 'Education', '9009': 'E-commerce', '9011': 'Logistics', '9012': 'Media',
+  '9013': 'SaaS', '9016': 'Manufacturing', '9018': 'AgriTech', '9027': 'PropTech',
+  '9053': 'CleanTech', '9055': 'Consumer', '9058': 'Digital Media', '9063': 'Food Tech',
+  '9096': 'FinTech', '9197': 'B2B Software'
 };
 const STREAK_COUNTRY_MAP = {
-  '9001':'🇮🇳 India','9002':'🇲🇾 Malaysia','9003':'🇸🇬 Singapore',
-  '9004':'🇧🇩 Bangladesh','9005':'🇻🇳 Vietnam','9006':'🇹🇭 Thailand',
-  '9007':'🇵🇭 Philippines','9008':'🇮🇩 Indonesia','9060':'🌏 SEA','9061':'🌐 Global'
+  '9001': '🇮🇳 India', '9002': '🇲🇾 Malaysia', '9003': '🇸🇬 Singapore',
+  '9004': '🇧🇩 Bangladesh', '9005': '🇻🇳 Vietnam', '9006': '🇹🇭 Thailand',
+  '9007': '🇵🇭 Philippines', '9008': '🇮🇩 Indonesia', '9060': '🌏 SEA', '9061': '🌐 Global'
 };
 
 function inferIndustry(d) {
@@ -565,7 +624,7 @@ function inferIndustry(d) {
     const code = String(Array.isArray(d.industry) ? d.industry[0] : d.industry);
     if (STREAK_INDUSTRY_MAP[code]) return STREAK_INDUSTRY_MAP[code];
   }
-  const text = `${d.name||''} ${d.description||''}`.toLowerCase();
+  const text = `${d.name || ''} ${d.description || ''}`.toLowerCase();
   if (/health|medic|clinic|pharma|hospital|doctor|therapy|diagnostics/.test(text)) return 'HealthTech';
   if (/fintech|payment|lending|loan|credit|banking|wallet|insurance|neobank/.test(text)) return 'FinTech';
   if (/edu|learn|school|college|course|tutor|upskill/.test(text)) return 'EdTech';
@@ -590,10 +649,10 @@ function inferCountry(d) {
 
 function scoreStreakDeal(d) {
   let score = 0;
-  const stagePts = {'5001':8,'5016':12,'5018':18,'5002':25,'5003':32,'5011':40,'5004':40,'5007':22,'5008':16,'5015':12,'5014':35};
+  const stagePts = { '5001': 8, '5016': 12, '5018': 18, '5002': 25, '5003': 32, '5011': 40, '5004': 40, '5007': 22, '5008': 16, '5015': 12, '5014': 35 };
   score += stagePts[d.stage_key] || 5;
-  score += Math.min(25, Math.round((d.total_emails||0) * 1.5));
-  if ((d.total_emails||0) > 0) score += Math.round(((d.total_received_emails||0) / d.total_emails) * 20);
+  score += Math.min(25, Math.round((d.total_emails || 0) * 1.5));
+  if ((d.total_emails || 0) > 0) score += Math.round(((d.total_received_emails || 0) / d.total_emails) * 20);
   if (d.last_email_timestamp) {
     const days = (Date.now() - d.last_email_timestamp) / 86400000;
     if (days < 7) score += 15; else if (days < 14) score += 10; else if (days < 30) score += 5;
@@ -621,8 +680,8 @@ function formatLastContact(ts) {
   if (days === 0) return { text: 'Today', color };
   if (days === 1) return { text: 'Yesterday', color };
   if (days < 7) return { text: `${days}d ago`, color };
-  if (days < 30) return { text: `${Math.floor(days/7)}w ago`, color };
-  return { text: `${Math.floor(days/30)}mo ago`, color };
+  if (days < 30) return { text: `${Math.floor(days / 7)}w ago`, color };
+  return { text: `${Math.floor(days / 30)}mo ago`, color };
 }
 
 // ---- News Intelligence Strip (used across all modules) ----
@@ -652,19 +711,19 @@ function getModuleNews(moduleName, limit) {
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:0">
         ${relevant.map(n => {
-          const color = typeColors[n.type] || '#64748b';
-          const pubDate = n.published_at ? new Date(n.published_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
-          return `
+    const color = typeColors[n.type] || '#64748b';
+    const pubDate = n.published_at ? new Date(n.published_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+    return `
           <div style="padding:12px 16px;border-right:1px solid rgba(255,255,255,0.04);border-bottom:1px solid rgba(255,255,255,0.04)">
             <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
-              <span style="font-size:0.6rem;padding:1px 6px;border-radius:6px;background:${color}20;color:${color};font-weight:600;white-space:nowrap">${(n.type || 'news').replace(/_/g,' ').toUpperCase()}</span>
+              <span style="font-size:0.6rem;padding:1px 6px;border-radius:6px;background:${color}20;color:${color};font-weight:600;white-space:nowrap">${(n.type || 'news').replace(/_/g, ' ').toUpperCase()}</span>
               <span style="font-size:0.6rem;color:var(--text-muted);margin-left:auto">${pubDate}</span>
             </div>
             <div style="font-size:0.78rem;font-weight:600;color:var(--text-primary);line-height:1.3;margin-bottom:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${n.title || ''}</div>
             <div style="font-size:0.7rem;color:var(--text-secondary);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${n.implication || n.ai_summary || ''}</div>
             ${n.source_url ? `<a href="${n.source_url}" target="_blank" style="font-size:0.65rem;color:var(--accent-blue);text-decoration:none;margin-top:4px;display:block">${n.source || 'Read more'} →</a>` : `<span style="font-size:0.65rem;color:var(--text-muted)">${n.source || ''}</span>`}
           </div>`;
-        }).join('')}
+  }).join('')}
       </div>
     </div>`;
 }
@@ -682,10 +741,10 @@ function renderDealFlow(area) {
   // Apply header filters
   if (filters.search) {
     const q = filters.search.toLowerCase();
-    filtered = filtered.filter(d => `${d.name} ${d.description||''} ${d._industry}`.toLowerCase().includes(q));
+    filtered = filtered.filter(d => `${d.name} ${d.description || ''} ${d._industry}`.toLowerCase().includes(q));
   }
   if (filters.geo !== 'All') {
-    filtered = filtered.filter(d => (d._country||'').includes(filters.geo) || String(d.country) === filters.geo);
+    filtered = filtered.filter(d => (d._country || '').includes(filters.geo) || String(d.country) === filters.geo);
   }
   if (filters.sector !== 'All') {
     filtered = filtered.filter(d => d._industry === filters.sector);
@@ -728,25 +787,25 @@ function renderDealFlow(area) {
 
     <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
       <button class="pipeline-tab" data-tab="all"
-        style="padding:6px 16px;border-radius:8px;border:1px solid var(--border-primary);background:${pipelineTab==='all'?'var(--accent-blue)':'var(--bg-secondary)'};color:${pipelineTab==='all'?'white':'var(--text-secondary)'};cursor:pointer;font-size:0.8rem">
+        style="padding:6px 16px;border-radius:8px;border:1px solid var(--border-primary);background:${pipelineTab === 'all' ? 'var(--accent-blue)' : 'var(--bg-secondary)'};color:${pipelineTab === 'all' ? 'white' : 'var(--text-secondary)'};cursor:pointer;font-size:0.8rem">
         All (${filtered.length})</button>
       <button class="pipeline-tab" data-tab="industry"
-        style="padding:6px 16px;border-radius:8px;border:1px solid var(--border-primary);background:${pipelineTab==='industry'?'var(--accent-purple)':'var(--bg-secondary)'};color:${pipelineTab==='industry'?'white':'var(--text-secondary)'};cursor:pointer;font-size:0.8rem">
+        style="padding:6px 16px;border-radius:8px;border:1px solid var(--border-primary);background:${pipelineTab === 'industry' ? 'var(--accent-purple)' : 'var(--bg-secondary)'};color:${pipelineTab === 'industry' ? 'white' : 'var(--text-secondary)'};cursor:pointer;font-size:0.8rem">
         By Industry</button>
       <button class="pipeline-tab" data-tab="stage"
-        style="padding:6px 16px;border-radius:8px;border:1px solid var(--border-primary);background:${pipelineTab==='stage'?'var(--accent-green)':'var(--bg-secondary)'};color:${pipelineTab==='stage'?'white':'var(--text-secondary)'};cursor:pointer;font-size:0.8rem">
+        style="padding:6px 16px;border-radius:8px;border:1px solid var(--border-primary);background:${pipelineTab === 'stage' ? 'var(--accent-green)' : 'var(--bg-secondary)'};color:${pipelineTab === 'stage' ? 'white' : 'var(--text-secondary)'};cursor:pointer;font-size:0.8rem">
         Pipeline Stages</button>
       <button class="pipeline-tab" data-tab="followup"
-        style="padding:6px 16px;border-radius:8px;border:1px solid var(--border-primary);background:${pipelineTab==='followup'?'#ef4444':'var(--bg-secondary)'};color:${pipelineTab==='followup'?'white':'var(--text-secondary)'};cursor:pointer;font-size:0.8rem">
+        style="padding:6px 16px;border-radius:8px;border:1px solid var(--border-primary);background:${pipelineTab === 'followup' ? '#ef4444' : 'var(--bg-secondary)'};color:${pipelineTab === 'followup' ? 'white' : 'var(--text-secondary)'};cursor:pointer;font-size:0.8rem">
         🚨 Follow-ups (${needsFollowUp})</button>
       <div style="flex:1"></div>
       <button id="add-deal-btn" style="padding:6px 16px;border-radius:8px;border:none;background:var(--accent-green);color:white;cursor:pointer;font-size:0.8rem;font-weight:600">+ Add Deal</button>
     </div>
 
     <div id="deal-flow-content">
-      ${pipelineTab === 'all'      ? renderDealGrid(filtered) : ''}
+      ${pipelineTab === 'all' ? renderDealGrid(filtered) : ''}
       ${pipelineTab === 'industry' ? renderByIndustry(filtered) : ''}
-      ${pipelineTab === 'stage'    ? renderByStage(filtered) : ''}
+      ${pipelineTab === 'stage' ? renderByStage(filtered) : ''}
       ${pipelineTab === 'followup' ? renderDealGrid(filtered.filter(d => d._fu.priority <= 2)) : ''}
     </div>
   `;
@@ -770,28 +829,28 @@ function renderDealGrid(deals) {
 
 function renderByIndustry(deals) {
   const groups = {};
-  deals.forEach(d => { const k = d._industry||'Other'; (groups[k]||(groups[k]=[])).push(d); });
-  return Object.entries(groups).sort((a,b) => b[1].length - a[1].length).map(([ind, group]) => `
+  deals.forEach(d => { const k = d._industry || 'Other'; (groups[k] || (groups[k] = [])).push(d); });
+  return Object.entries(groups).sort((a, b) => b[1].length - a[1].length).map(([ind, group]) => `
     <div style="margin-bottom:24px">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:8px 14px;background:var(--bg-secondary);border-radius:8px;border-left:3px solid var(--accent-purple)">
         <span style="font-weight:700;color:var(--text-primary)">${ind}</span>
         <span style="font-size:0.72rem;padding:2px 8px;border-radius:12px;background:var(--accent-purple)20;color:var(--accent-purple)">${group.length} deals</span>
-        <span style="font-size:0.7rem;color:var(--text-muted);margin-left:auto">avg score: ${Math.round(group.reduce((s,d)=>s+d._score,0)/group.length)}</span>
+        <span style="font-size:0.7rem;color:var(--text-muted);margin-left:auto">avg score: ${Math.round(group.reduce((s, d) => s + d._score, 0) / group.length)}</span>
       </div>
       <div class="deal-grid">${group.map(d => renderStreakDealCard(d)).join('')}</div>
     </div>`).join('');
 }
 
 function renderByStage(deals) {
-  const order = ['5007','5011','5004','5003','5002','5018','5016','5008','5001','5015','5014','5009','5006','5017'];
+  const order = ['5007', '5011', '5004', '5003', '5002', '5018', '5016', '5008', '5001', '5015', '5014', '5009', '5006', '5017'];
   const groups = {};
-  deals.forEach(d => { (groups[d.stage_key]||(groups[d.stage_key]=[])).push(d); });
+  deals.forEach(d => { (groups[d.stage_key] || (groups[d.stage_key] = [])).push(d); });
   return order.filter(k => groups[k]).map(k => {
-    const color = STREAK_STAGE_COLORS[k]||'#64748b';
+    const color = STREAK_STAGE_COLORS[k] || '#64748b';
     return `
     <div style="margin-bottom:24px">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:8px 14px;background:var(--bg-secondary);border-radius:8px;border-left:3px solid ${color}">
-        <span style="font-weight:700;color:${color}">${STREAK_STAGE_NAMES[k]||k}</span>
+        <span style="font-weight:700;color:${color}">${STREAK_STAGE_NAMES[k] || k}</span>
         <span style="font-size:0.72rem;padding:2px 8px;border-radius:12px;background:${color}20;color:${color}">${groups[k].length} deals</span>
       </div>
       <div class="deal-grid">${groups[k].map(d => renderStreakDealCard(d)).join('')}</div>
@@ -801,15 +860,33 @@ function renderByStage(deals) {
 
 function renderStreakDealCard(d) {
   const stageColor = STREAK_STAGE_COLORS[d.stage_key] || '#64748b';
-  const stageName  = STREAK_STAGE_NAMES[d.stage_key]  || d.stage_key;
-  const industry   = d._industry || inferIndustry(d);
-  const country    = d._country  || inferCountry(d);
-  const score      = d._score    !== undefined ? d._score : scoreStreakDeal(d);
-  const fu         = d._fu       || getFollowUpStatus(d);
-  const lc         = formatLastContact(d.last_email_timestamp);
-  const assignees  = (() => { try { return JSON.parse(d.assigned_to||'[]'); } catch { return []; } })();
+  const stageName = STREAK_STAGE_NAMES[d.stage_key] || d.stage_key;
+  const industry = d._industry || inferIndustry(d);
+  const country = d._country || inferCountry(d);
+  const score = d._score !== undefined ? d._score : scoreStreakDeal(d);
+  const fu = d._fu || getFollowUpStatus(d);
+  const lc = formatLastContact(d.last_email_timestamp);
+  const assignees = (() => { try { return JSON.parse(d.assigned_to || '[]'); } catch { return []; } })();
   const scoreColor = score >= 70 ? '#10b981' : score >= 45 ? '#f59e0b' : '#ef4444';
-  const name = (d.name||'').replace(/^www\./,'').replace(/\.(com|co\.in|co|in|io|ai|vc|org|net)(\/.*)?$/i,'');
+  const name = (d.name || '').replace(/^www\./, '').replace(/\.(com|co\.in|co|in|io|ai|vc|org|net)(\/.*)?$/i, '');
+
+  // GPT Enrichment overlay
+  const enrich = (window._dealEnrichments || {})[d.box_key];
+  let enrichBadge = '';
+  let enrichRow = '';
+  if (enrich) {
+    const fitScore = enrich.thesis_fit_score || 0;
+    const fitColor = fitScore >= 70 ? '#10b981' : fitScore >= 40 ? '#f59e0b' : '#ef4444';
+    enrichBadge = `<span style="font-size:0.6rem;padding:2px 7px;border-radius:10px;background:${fitColor}20;color:${fitColor};font-weight:700" title="AI Thesis Fit">🧠 ${fitScore}</span>`;
+    const topStrength = (enrich.strengths || [])[0];
+    const topRisk = (enrich.risks || [])[0];
+    if (topStrength || topRisk) {
+      enrichRow = `<div style="font-size:0.68rem;margin-bottom:6px;line-height:1.4">
+        ${topStrength ? `<span style="color:#10b981">✅ ${topStrength}</span>` : ''}
+        ${topRisk ? `<span style="color:#f59e0b;margin-left:6px">⚠️ ${topRisk}</span>` : ''}
+      </div>`;
+    }
+  }
 
   return `
     <div class="deal-card streak-deal-card animated-item" data-boxkey="${d.box_key}" style="border-left:3px solid ${stageColor};cursor:pointer">
@@ -820,6 +897,7 @@ function renderStreakDealCard(d) {
             <span style="font-size:0.65rem;padding:2px 7px;border-radius:10px;background:${stageColor}20;color:${stageColor};font-weight:600">${stageName}</span>
             <span style="font-size:0.65rem;padding:2px 7px;border-radius:10px;background:var(--accent-purple)15;color:var(--accent-purple)">${industry}</span>
             ${country ? `<span style="font-size:0.65rem;padding:2px 7px;border-radius:10px;background:var(--bg-tertiary);color:var(--text-muted)">${country}</span>` : ''}
+            ${enrichBadge}
           </div>
         </div>
         <div style="text-align:right;min-width:44px;margin-left:8px">
@@ -827,6 +905,7 @@ function renderStreakDealCard(d) {
           <div style="font-size:0.55rem;color:var(--text-muted)">SCORE</div>
         </div>
       </div>
+      ${enrichRow}
       ${d.description ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:8px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${d.description}</div>` : ''}
       <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">
         ${d.funding_stage ? `<span style="font-size:0.65rem;padding:2px 7px;border-radius:10px;background:var(--accent-green)15;color:var(--accent-green)">${d.funding_stage}</span>` : ''}
@@ -839,10 +918,10 @@ function renderStreakDealCard(d) {
         </div>
         <div style="text-align:center">
           <div style="font-size:0.6rem;color:var(--text-muted)">Emails</div>
-          <div style="font-size:0.72rem;color:var(--text-secondary)">↑${d.total_sent_emails||0} ↓${d.total_received_emails||0}</div>
+          <div style="font-size:0.72rem;color:var(--text-secondary)">↑${d.total_sent_emails || 0} ↓${d.total_received_emails || 0}</div>
         </div>
         <div style="display:flex;gap:2px">
-          ${assignees.slice(0,3).map(a=>`<span title="${a.name||a.email}" style="width:22px;height:22px;border-radius:50%;background:var(--accent-blue);color:white;font-size:0.5rem;display:flex;align-items:center;justify-content:center;font-weight:700">${(a.name||'U').split(' ').map(n=>n[0]).join('').substring(0,2)}</span>`).join('')}
+          ${assignees.slice(0, 3).map(a => `<span title="${a.name || a.email}" style="width:22px;height:22px;border-radius:50%;background:var(--accent-blue);color:white;font-size:0.5rem;display:flex;align-items:center;justify-content:center;font-weight:700">${(a.name || 'U').split(' ').map(n => n[0]).join('').substring(0, 2)}</span>`).join('')}
         </div>
       </div>
     </div>`;
@@ -1268,8 +1347,27 @@ const SAMPLE_DECKS = [
 ];
 
 function renderDeckAnalyzer(area) {
-  const total = uploadedDecks.length + SAMPLE_DECKS.length;
-  const allDecks = [...SAMPLE_DECKS, ...uploadedDecks];
+  // Merge: sample decks + Supabase saved decks + session uploads
+  const savedDecks = (window._savedDecks || []).map(sd => ({
+    id: `db-${sd.id}`,
+    name: sd.filename,
+    company: sd.company_name || sd.filename,
+    type: 'pdf',
+    uploadDate: sd.upload_date || '',
+    ratings: {
+      problem: sd.score_problem || 0, solution: sd.score_solution || 0,
+      market: sd.score_market || 0, team: sd.score_team || 0,
+      traction: sd.score_traction || 0, businessModel: sd.score_biz_model || 0,
+      financials: sd.score_financials || 0, ask: sd.score_ask || 0
+    },
+    verdict: sd.verdict || 'review',
+    verdictText: sd.verdict_text || '',
+    strengths: sd.strengths || [],
+    weaknesses: sd.weaknesses || [],
+    redFlags: sd.red_flags || []
+  }));
+  const allDecks = [...savedDecks, ...uploadedDecks, ...SAMPLE_DECKS];
+  const total = allDecks.length;
   const passCount = allDecks.filter(d => d.verdict === 'pass').length;
   const reviewCount = allDecks.filter(d => d.verdict === 'review').length;
   const skipCount = allDecks.filter(d => d.verdict === 'skip').length;
@@ -1329,52 +1427,180 @@ function renderDeckAnalyzer(area) {
   fileInput.addEventListener('change', (e) => handleDeckUpload(e.target.files));
 }
 
-function handleDeckUpload(files) {
+async function handleDeckUpload(files) {
   if (!files || files.length === 0) return;
   const file = files[0];
   const ext = file.name.split('.').pop().toLowerCase();
   const type = ext === 'pdf' ? 'pdf' : 'ppt';
+  const fileName = file.name.replace(/\.[^/.]+$/, '');
 
-  // Simulate AI analysis
-  const ratings = {
-    problem: 50 + Math.floor(Math.random() * 40),
-    solution: 50 + Math.floor(Math.random() * 40),
-    market: 50 + Math.floor(Math.random() * 40),
-    team: 40 + Math.floor(Math.random() * 45),
-    traction: 30 + Math.floor(Math.random() * 50),
-    businessModel: 40 + Math.floor(Math.random() * 45),
-    financials: 35 + Math.floor(Math.random() * 45),
-    ask: 40 + Math.floor(Math.random() * 45)
-  };
-
-  const avg = Math.round(Object.values(ratings).reduce((a, b) => a + b, 0) / 8);
-  let verdict, verdictText;
-  if (avg >= 75) {
-    verdict = 'pass';
-    verdictText = `Strong deck from ${file.name.replace(/\.[^/.]+$/, '')}. Recommend proceeding to partner meeting for deeper evaluation. Key metrics and team credentials are compelling.`;
-  } else if (avg >= 55) {
-    verdict = 'review';
-    verdictText = `Deck shows promise but needs additional diligence. Some sections are strong but others need more data. Request follow-up materials before IC.`;
-  } else {
-    verdict = 'skip';
-    verdictText = `Deck does not meet current investment criteria. Insufficient traction and unclear competitive positioning. Recommend passing at this stage.`;
+  // Show loading state
+  const area = document.getElementById('content-area');
+  const uploadZone = document.getElementById('deck-upload-zone');
+  if (uploadZone) {
+    uploadZone.innerHTML = `
+      <div style="text-align:center;padding:20px">
+        <div style="font-size:2rem;margin-bottom:12px" class="spin-animation">🧠</div>
+        <div style="font-weight:700;color:var(--text-primary)">Analyzing "${fileName}" with GPT-4o...</div>
+        <div style="color:var(--text-muted);font-size:0.8rem;margin-top:8px">Extracting text → AI scoring → Red flag detection</div>
+      </div>`;
   }
 
-  const newDeck = {
-    id: `deck-${Date.now()}`,
-    name: file.name.replace(/\.[^/.]+$/, ''),
-    company: file.name.replace(/\.[^/.]+$/, '').split('-')[0].trim(),
-    type: type,
-    uploadDate: new Date().toISOString().split('T')[0],
-    ratings,
-    verdict,
-    verdictText,
-    strengths: ['AI analysis in progress — review manually for full assessment'],
-    weaknesses: ['Automated analysis may miss nuances — partner review recommended']
-  };
+  try {
+    // Read file as text (works for PDF text layers)
+    const fileText = await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        let text = reader.result;
+        // For PDFs, extract readable text chunks  
+        if (type === 'pdf') {
+          // Extract readable text between stream objects
+          const textParts = [];
+          const matches = text.match(/\(([^)]{3,200})\)/g);
+          if (matches) {
+            matches.forEach(m => {
+              const clean = m.slice(1, -1).replace(/\\[()\\]/g, '');
+              if (clean.length > 3 && /[a-zA-Z]/.test(clean)) textParts.push(clean);
+            });
+          }
+          resolve(textParts.join(' ').substring(0, 4000) || `Pitch deck for ${fileName}`);
+        } else {
+          resolve(text.substring(0, 4000) || `Pitch deck for ${fileName}`);
+        }
+      };
+      reader.onerror = () => resolve(`Pitch deck for ${fileName}`);
+      reader.readAsText(file);
+    });
 
-  uploadedDecks.unshift(newDeck);
-  renderDeckAnalyzer(document.getElementById('content-area'));
+    // Call GPT-4o for real analysis
+    const OPENAI_KEY = CONFIG.openaiApiKey || '';
+    if (!OPENAI_KEY) throw new Error('No OpenAI API key configured');
+
+    const prompt = `You are a senior VC partner reviewing a pitch deck. Analyze the following deck content and score it.
+
+Deck Title: ${fileName}
+Content extracted from deck:
+${fileText}
+
+Respond with ONLY valid JSON (no markdown fences), matching this schema:
+{
+  "company_name": "name of the company",
+  "scores": {
+    "problem": 72, "solution": 65, "market": 80, "team": 55,
+    "traction": 40, "businessModel": 60, "financials": 45, "ask": 70
+  },
+  "verdict": "pass",
+  "verdict_text": "2-3 sentence recommendation for the IC",
+  "strengths": ["strength 1", "strength 2", "strength 3"],
+  "weaknesses": ["weakness 1", "weakness 2"],
+  "red_flags": ["any critical red flags found"]
+}
+
+Rules:
+- Each score is 0-100
+- verdict is "pass" (score>=75), "review" (55-74), or "skip" (<55) based on average
+- Be specific, not generic. Reference actual content from the deck.
+- red_flags: unrealistic TAM, no traction, missing financials, no clear moat, etc.`;
+
+    const gptRes = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENAI_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.3,
+        max_tokens: 1000
+      })
+    });
+
+    const gptData = await gptRes.json();
+    const content = gptData.choices?.[0]?.message?.content || '{}';
+    const cleaned = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    const parsed = JSON.parse(cleaned);
+
+    const ratings = parsed.scores || {};
+    const avg = Math.round(Object.values(ratings).reduce((a, b) => a + b, 0) / 8);
+
+    const newDeck = {
+      id: `deck-${Date.now()}`,
+      name: fileName,
+      company: parsed.company_name || fileName.split('-')[0].trim(),
+      type: type,
+      uploadDate: new Date().toISOString().split('T')[0],
+      ratings,
+      verdict: parsed.verdict || (avg >= 75 ? 'pass' : avg >= 55 ? 'review' : 'skip'),
+      verdictText: parsed.verdict_text || '',
+      strengths: parsed.strengths || [],
+      weaknesses: parsed.weaknesses || [],
+      redFlags: parsed.red_flags || []
+    };
+
+    // Save to Supabase
+    if (supabaseClient) {
+      try {
+        await fetch(`${SUPABASE_URL}/rest/v1/deck_analyses`, {
+          method: 'POST',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=minimal'
+          },
+          body: JSON.stringify({
+            filename: fileName,
+            company_name: newDeck.company,
+            score_problem: ratings.problem || 0,
+            score_solution: ratings.solution || 0,
+            score_market: ratings.market || 0,
+            score_team: ratings.team || 0,
+            score_traction: ratings.traction || 0,
+            score_biz_model: ratings.businessModel || 0,
+            score_financials: ratings.financials || 0,
+            score_ask: ratings.ask || 0,
+            avg_score: avg,
+            verdict: newDeck.verdict,
+            verdict_text: newDeck.verdictText,
+            strengths: newDeck.strengths,
+            weaknesses: newDeck.weaknesses,
+            red_flags: newDeck.redFlags,
+            extracted_text: fileText.substring(0, 5000)
+          })
+        });
+        console.log('✅ Deck analysis saved to Supabase');
+      } catch (saveErr) {
+        console.warn('Could not save deck analysis:', saveErr);
+      }
+    }
+
+    uploadedDecks.unshift(newDeck);
+    renderDeckAnalyzer(document.getElementById('content-area'));
+
+  } catch (err) {
+    console.error('Deck analysis failed:', err);
+    // Fallback to simple heuristic scoring
+    const ratings = {
+      problem: 50, solution: 50, market: 50, team: 50,
+      traction: 30, businessModel: 45, financials: 35, ask: 45
+    };
+    const newDeck = {
+      id: `deck-${Date.now()}`,
+      name: fileName,
+      company: fileName.split('-')[0].trim(),
+      type: type,
+      uploadDate: new Date().toISOString().split('T')[0],
+      ratings,
+      verdict: 'review',
+      verdictText: `AI analysis failed (${err.message}). Default scores assigned. Please review manually.`,
+      strengths: ['Manual review required'],
+      weaknesses: ['AI analysis could not complete — check API key'],
+      redFlags: ['Analysis incomplete']
+    };
+    uploadedDecks.unshift(newDeck);
+    renderDeckAnalyzer(document.getElementById('content-area'));
+  }
 }
 
 function renderDeckCard(d) {
@@ -1437,6 +1663,12 @@ function renderDeckCard(d) {
         <div style="margin-top:4px;font-size:0.75rem">
           <span style="color:var(--accent-amber);font-weight:700">Weaknesses:</span>
           <span style="color:var(--text-secondary)">${d.weaknesses.join(' · ')}</span>
+        </div>` : ''}
+
+      ${(d.redFlags && d.redFlags.length > 0) ? `
+        <div style="margin-top:6px;font-size:0.75rem">
+          <span style="color:#ef4444;font-weight:700">🚩 Red Flags:</span>
+          <span style="color:#ef4444">${d.redFlags.join(' · ')}</span>
         </div>` : ''}
 
       <div class="deck-action-btns">
@@ -1621,7 +1853,7 @@ function renderPortfolio(area) {
 
   function getDaysSince(d) {
     const ts = d.last_email_timestamp ? parseInt(d.last_email_timestamp) :
-               d.updated_at ? parseInt(d.updated_at) : null;
+      d.updated_at ? parseInt(d.updated_at) : null;
     if (!ts) return 999;
     return Math.floor((now - ts) / 86400000);
   }
@@ -1669,18 +1901,18 @@ function renderPortfolio(area) {
 
     <div class="portfolio-grid">
       ${portfolio.map(p => {
-        const health = getHealth(p);
-        const industry = p._industry || inferIndustry(p);
-        const country = p._country || inferCountry(p);
-        const days = getDaysSince(p);
-        const score = p._score !== undefined ? p._score : scoreStreakDeal(p);
-        const scoreColor = score >= 70 ? '#10b981' : score >= 45 ? '#f59e0b' : '#ef4444';
-        const enrich = (window._dealEnrichments || {})[p.box_key] || {};
-        const assignees = (() => { try { return JSON.parse(p.assigned_to || '[]'); } catch { return []; } })();
-        const name = (p.name || '').replace(/^www\./, '').replace(/\.(com|co\.in|co|in|io|ai|vc|org|net)(\/.*)?$/i, '');
-        return `
+    const health = getHealth(p);
+    const industry = p._industry || inferIndustry(p);
+    const country = p._country || inferCountry(p);
+    const days = getDaysSince(p);
+    const score = p._score !== undefined ? p._score : scoreStreakDeal(p);
+    const scoreColor = score >= 70 ? '#10b981' : score >= 45 ? '#f59e0b' : '#ef4444';
+    const enrich = (window._dealEnrichments || {})[p.box_key] || {};
+    const assignees = (() => { try { return JSON.parse(p.assigned_to || '[]'); } catch { return []; } })();
+    const name = (p.name || '').replace(/^www\./, '').replace(/\.(com|co\.in|co|in|io|ai|vc|org|net)(\/.*)?$/i, '');
+    return `
           <div class="portfolio-card animated-item" style="cursor:pointer" onclick="openStreakDealModal(${JSON.stringify(p).replace(/"/g, '&quot;')})">
-            <div class="portfolio-logo" style="font-size:1.4rem">${industry.slice(0,2)}</div>
+            <div class="portfolio-logo" style="font-size:1.4rem">${industry.slice(0, 2)}</div>
             <div>
               <div class="portfolio-info-name">${name}</div>
               <div class="portfolio-info-sub">${p.funding_stage || industry} · ${country}</div>
@@ -1703,12 +1935,12 @@ function renderPortfolio(area) {
                 ${enrich.thesis_fit_score ? `<span style="font-size:0.65rem;padding:1px 6px;border-radius:6px;background:var(--accent-purple)15;color:var(--accent-purple)">Fit: ${enrich.thesis_fit_score}/100</span>` : ''}
               </div>
               ${enrich.founder_name ? `<div style="font-size:0.7rem;color:var(--text-muted)">👤 ${enrich.founder_name}</div>` : ''}
-              ${(enrich.strengths || []).slice(0,1).map(s => `<div style="font-size:0.72rem;color:var(--accent-green);line-height:1.4">✓ ${s}</div>`).join('')}
-              ${(enrich.risks || []).slice(0,1).map(r => `<div style="font-size:0.72rem;color:var(--accent-orange);line-height:1.4">⚠ ${r}</div>`).join('')}
+              ${(enrich.strengths || []).slice(0, 1).map(s => `<div style="font-size:0.72rem;color:var(--accent-green);line-height:1.4">✓ ${s}</div>`).join('')}
+              ${(enrich.risks || []).slice(0, 1).map(r => `<div style="font-size:0.72rem;color:var(--accent-orange);line-height:1.4">⚠ ${r}</div>`).join('')}
               ${assignees.length ? `<div style="font-size:0.68rem;color:var(--text-muted)">👤 ${assignees.map(a => a.name || a.email || a).join(', ')}</div>` : ''}
             </div>
           </div>`;
-      }).join('')}
+  }).join('')}
     </div>
     ${watching.length ? `
     <div class="section-title-row" style="margin-top:32px">
@@ -1785,7 +2017,7 @@ function renderPowerMoves(area) {
       });
     });
 
-    recentActive.filter(d => !['5007','5011'].includes(d.stage_key)).slice(0, 8).forEach(d => {
+    recentActive.filter(d => !['5007', '5011'].includes(d.stage_key)).slice(0, 8).forEach(d => {
       const name = (d.name || '').replace(/\.(com|co\.in|io|ai|net|org)(\/.*)?$/i, '');
       const stageName = STREAK_STAGE_NAMES[d.stage_key] || d.stage_key;
       powerItems.push({
@@ -2494,21 +2726,21 @@ function renderFundRadar(area) {
   const confColors = { High: 'var(--accent-green)', Medium: 'var(--accent-orange)', Low: 'var(--text-muted)' };
   const confBg = { High: 'rgba(16,185,129,0.1)', Medium: 'rgba(245,158,11,0.1)', Low: 'rgba(148,163,184,0.1)' };
   const HIGH_STAGES = new Set(['5003', '5011', '5004', '5007']);
-  const MED_STAGES  = new Set(['5002', '5018']);
-  const ACTIVE      = new Set(['5001','5016','5018','5002','5003','5011','5004','5007','5008','5015']);
+  const MED_STAGES = new Set(['5002', '5018']);
+  const ACTIVE = new Set(['5001', '5016', '5018', '5002', '5003', '5011', '5004', '5007', '5008', '5015']);
   const now = Date.now();
 
   function getDaysSince(d) {
     const ts = d.last_email_timestamp ? parseInt(d.last_email_timestamp) :
-               d.updated_at ? parseInt(d.updated_at) : null;
+      d.updated_at ? parseInt(d.updated_at) : null;
     if (!ts) return 999;
     return Math.floor((now - ts) / 86400000);
   }
   function getTimeLabel(days) {
     if (days === 0) return 'Today'; if (days === 1) return '1 day ago';
     if (days < 7) return `${days} days ago`; if (days < 14) return '1 week ago';
-    if (days < 30) return `${Math.floor(days/7)} weeks ago`;
-    return `${Math.floor(days/30)} months ago`;
+    if (days < 30) return `${Math.floor(days / 7)} weeks ago`;
+    return `${Math.floor(days / 30)} months ago`;
   }
   function getConf(d) {
     return HIGH_STAGES.has(d.stage_key) ? 'High' : MED_STAGES.has(d.stage_key) ? 'Medium' : 'Low';
@@ -2571,7 +2803,7 @@ function renderFundRadar(area) {
     <div class="phase3-grid">
       <div class="phase3-panel" style="flex:2">
         <h3 class="phase3-panel-title">📡 Signal Feed <span style="font-size:0.7rem;font-weight:400;color:var(--text-muted);margin-left:8px">Live · Streak CRM</span></h3>
-        ${newsSignals.length ? `<div style="margin-bottom:12px;padding:10px 14px;background:rgba(16,185,129,0.05);border:1px solid rgba(16,185,129,0.15);border-radius:8px"><div style="font-size:0.7rem;font-weight:600;color:var(--accent-green);margin-bottom:6px">📰 FROM NEWS (${newsSignals.length} funding rounds detected)</div>${newsSignals.map(n => `<div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px">• ${n.title} ${n.published_at ? '<span style="color:var(--text-muted);font-size:0.65rem">· ' + new Date(n.published_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}) + '</span>' : ''}</div>`).join('')}</div>` : ''}
+        ${newsSignals.length ? `<div style="margin-bottom:12px;padding:10px 14px;background:rgba(16,185,129,0.05);border:1px solid rgba(16,185,129,0.15);border-radius:8px"><div style="font-size:0.7rem;font-weight:600;color:var(--accent-green);margin-bottom:6px">📰 FROM NEWS (${newsSignals.length} funding rounds detected)</div>${newsSignals.map(n => `<div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px">• ${n.title} ${n.published_at ? '<span style="color:var(--text-muted);font-size:0.65rem">· ' + new Date(n.published_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + '</span>' : ''}</div>`).join('')}</div>` : ''}
         <div class="signal-feed">
           ${signals.map(sig => `
             <div class="signal-item" style="border-left:3px solid ${confColors[sig.confidence]}">
@@ -2607,7 +2839,7 @@ function renderFundRadar(area) {
 
         <h3 class="phase3-panel-title" style="margin-top:24px">🏭 Industry Mix</h3>
         <div class="geo-heat-list">
-          ${Object.entries(industryHeat).sort((a,b) => b[1]-a[1]).slice(0,8).map(([ind, count]) => `
+          ${Object.entries(industryHeat).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([ind, count]) => `
             <div class="geo-heat-item">
               <span class="geo-name">${ind}</span>
               <div class="geo-bar-wrap"><div class="geo-bar" style="width:${(count / indMax) * 100}%;background:var(--accent-purple)"></div></div>
@@ -2627,8 +2859,8 @@ function renderVCCRM(area) {
 
   const now = Date.now();
   const ACTIVE_DEAL_STAGES = new Set(['5011', '5004', '5014', '5007']);
-  const PIPELINE_STAGES    = new Set(['5002', '5003', '5018']);
-  const WATCHING_STAGES    = new Set(['5001', '5016', '5008', '5015']);
+  const PIPELINE_STAGES = new Set(['5002', '5003', '5018']);
+  const WATCHING_STAGES = new Set(['5001', '5016', '5008', '5015']);
 
   function getStatus(d) {
     if (ACTIVE_DEAL_STAGES.has(d.stage_key)) return 'Active Deal';
@@ -2637,7 +2869,7 @@ function renderVCCRM(area) {
   }
   function getDaysSince(d) {
     const ts = d.last_email_timestamp ? parseInt(d.last_email_timestamp) :
-               d.updated_at ? parseInt(d.updated_at) : null;
+      d.updated_at ? parseInt(d.updated_at) : null;
     if (!ts) return 999;
     return Math.floor((now - ts) / 86400000);
   }
@@ -2645,8 +2877,8 @@ function renderVCCRM(area) {
     if (days >= 999) return 'Never';
     if (days === 0) return 'Today'; if (days === 1) return 'Yesterday';
     if (days < 7) return `${days} days ago`; if (days < 14) return '1 week ago';
-    if (days < 30) return `${Math.floor(days/7)} weeks ago`;
-    return `${Math.floor(days/30)} months ago`;
+    if (days < 30) return `${Math.floor(days / 7)} weeks ago`;
+    return `${Math.floor(days / 30)} months ago`;
   }
   function getNextFollowUp(d, days) {
     if (d.stage_key === '5007') return 'Tomorrow';
@@ -2661,7 +2893,7 @@ function renderVCCRM(area) {
     if (PIPELINE_STAGES.has(d.stage_key)) return 2; return 1;
   }
 
-  const SHOW = new Set(['5007','5011','5004','5003','5002','5018','5001','5016','5008','5015','5014']);
+  const SHOW = new Set(['5007', '5011', '5004', '5003', '5002', '5018', '5001', '5016', '5008', '5015', '5014']);
   const relationships = streakDeals
     .filter(d => SHOW.has(d.stage_key))
     .map(d => {
@@ -2720,7 +2952,7 @@ function renderVCCRM(area) {
                 </div>
                 ${r.enrich.founder_background ? `<div class="crm-notes">👤 ${r.enrich.founder_background}</div>` : ''}
                 ${r.d.description ? `<div class="crm-notes" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">📝 ${r.d.description}</div>` : ''}
-                ${(r.enrich.investors||[]).length ? `<div class="crm-notes">🤝 Investors: ${r.enrich.investors.slice(0,3).join(', ')}</div>` : ''}
+                ${(r.enrich.investors || []).length ? `<div class="crm-notes">🤝 Investors: ${r.enrich.investors.slice(0, 3).join(', ')}</div>` : ''}
               </div>
             </div>
           `).join('')}
@@ -2743,12 +2975,12 @@ function renderVCCRM(area) {
         <h3 class="phase3-panel-title" style="margin-top:24px">📊 Stage Breakdown</h3>
         <div class="intro-network">
           ${(() => {
-            const counts = {};
-            streakDeals.forEach(d => { const n = STREAK_STAGE_NAMES[d.stage_key] || d.stage_key; counts[n] = (counts[n]||0)+1; });
-            return Object.entries(counts).sort((a,b)=>b[1]-a[1]).map(([s,c]) =>
-              `<div class="intro-source"><span class="intro-name">${s}</span><span class="intro-count">${c}</span></div>`
-            ).join('');
-          })()}
+      const counts = {};
+      streakDeals.forEach(d => { const n = STREAK_STAGE_NAMES[d.stage_key] || d.stage_key; counts[n] = (counts[n] || 0) + 1; });
+      return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([s, c]) =>
+        `<div class="intro-source"><span class="intro-name">${s}</span><span class="intro-count">${c}</span></div>`
+      ).join('');
+    })()}
         </div>
       </div>
     </div>
@@ -3333,11 +3565,11 @@ function renderDealVelocity(area) {
   }
 
   const now = Date.now();
-  const STAGE_ORDER  = ['5001','5016','5018','5002','5003','5011','5004','5014'];
-  const STAGE_LABELS = { '5001':'Sourced','5016':'Pinged','5018':'Meeting Set','5002':'Met+Active','5003':'Deep Dive','5011':'IC Review','5004':'Term Sheet','5014':'Closed' };
-  const STAGE_COLORS = { '5001':'#64748b','5016':'#6366f1','5018':'#8b5cf6','5002':'#f59e0b','5003':'#f97316','5011':'#ec4899','5004':'#10b981','5014':'#22c55e' };
-  const ACTIVE = new Set(['5002','5003','5011','5004','5007','5018']);
-  const statusColors = { Fast:'var(--accent-green)', Normal:'var(--accent-blue)', Slow:'var(--accent-red)' };
+  const STAGE_ORDER = ['5001', '5016', '5018', '5002', '5003', '5011', '5004', '5014'];
+  const STAGE_LABELS = { '5001': 'Sourced', '5016': 'Pinged', '5018': 'Meeting Set', '5002': 'Met+Active', '5003': 'Deep Dive', '5011': 'IC Review', '5004': 'Term Sheet', '5014': 'Closed' };
+  const STAGE_COLORS = { '5001': '#64748b', '5016': '#6366f1', '5018': '#8b5cf6', '5002': '#f59e0b', '5003': '#f97316', '5011': '#ec4899', '5004': '#10b981', '5014': '#22c55e' };
+  const ACTIVE = new Set(['5002', '5003', '5011', '5004', '5007', '5018']);
+  const statusColors = { Fast: 'var(--accent-green)', Normal: 'var(--accent-blue)', Slow: 'var(--accent-red)' };
 
   function getDaysIn(d) {
     const ts = d.created_at ? parseInt(d.created_at) : null;
@@ -3378,8 +3610,8 @@ function renderDealVelocity(area) {
       <div class="phase3-panel" style="flex:2">
         <h3 class="phase3-panel-title">⚡ Deal Timeline <span style="font-size:0.7rem;font-weight:400;color:var(--text-muted);margin-left:8px">Top ${activeDeals.length} active · Live</span></h3>
         <div class="velocity-list">
-          ${activeDeals.map(({d, days, status}) => {
-    const name = (d.name||'').replace(/^www\./,'').replace(/\.(com|co\.in|io|ai|net|org)(\/.*)?$/i,'');
+          ${activeDeals.map(({ d, days, status }) => {
+    const name = (d.name || '').replace(/^www\./, '').replace(/\.(com|co\.in|io|ai|net|org)(\/.*)?$/i, '');
     const stageName = STREAK_STAGE_NAMES[d.stage_key] || d.stage_key;
     const stageColor = STAGE_COLORS[d.stage_key] || '#64748b';
     const barWidth = Math.min((days / maxDays) * 100, 100);
@@ -3407,7 +3639,7 @@ function renderDealVelocity(area) {
         <div class="funnel-list">
           ${funnel.map(f => `
             <div class="funnel-step">
-              <div class="funnel-bar" style="width:${(f.count / funnel[0].count) * 100}%;background:${STAGE_COLORS[f.key]||'var(--accent-blue)'}"></div>
+              <div class="funnel-bar" style="width:${(f.count / funnel[0].count) * 100}%;background:${STAGE_COLORS[f.key] || 'var(--accent-blue)'}"></div>
               <div class="funnel-label">${f.stage}</div>
               <div class="funnel-count">${f.count}</div>
             </div>
@@ -3416,10 +3648,10 @@ function renderDealVelocity(area) {
 
         <h3 class="phase3-panel-title" style="margin-top:24px">📊 Stage Distribution</h3>
         <div class="geo-heat-list">
-          ${funnel.slice(0,8).map(f => `
+          ${funnel.slice(0, 8).map(f => `
             <div class="geo-heat-item">
               <span class="geo-name">${f.stage}</span>
-              <div class="geo-bar-wrap"><div class="geo-bar" style="width:${(f.count / funnel[0].count) * 100}%;background:${STAGE_COLORS[f.key]||'#6366f1'}"></div></div>
+              <div class="geo-bar-wrap"><div class="geo-bar" style="width:${(f.count / funnel[0].count) * 100}%;background:${STAGE_COLORS[f.key] || '#6366f1'}"></div></div>
               <span class="geo-count">${f.count}</span>
             </div>`).join('')}
         </div>
