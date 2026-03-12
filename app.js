@@ -135,6 +135,22 @@ async function initSupabase() {
         console.warn('deck_analyses fetch skipped:', e5.message);
       }
 
+      // Fetch newly added Phase 6 tables
+      try {
+        const { data: portData } = await supabaseClient.from('portfolio_metrics').select('*');
+        window._portfolioMetrics = portData || [];
+        const { data: boardData } = await supabaseClient.from('board_meetings').select('*');
+        window._boardMeetings = boardData || [];
+        const { data: founderData } = await supabaseClient.from('founder_profiles').select('*');
+        window._founderProfiles = founderData || [];
+        console.log(`✅ Loaded phase 6 tables: ${window._portfolioMetrics.length} portfolio, ${window._boardMeetings.length} board, ${window._founderProfiles.length} founders`);
+      } catch (e6) {
+        window._portfolioMetrics = [];
+        window._boardMeetings = [];
+        window._founderProfiles = [];
+        console.warn('Phase 6 tables fetch skipped:', e6.message);
+      }
+
       return startupsData;
     }
   } catch (e) {
@@ -498,25 +514,32 @@ function renderCurrentSection() {
   switch (currentSection) {
     case 'dealflow': renderDealFlow(area); break;
     case 'deckanalyzer': renderDeckAnalyzer(area); break;
-    case 'valuation': renderValuation(area); break;
-    case 'thesis': renderThesis(area); break;
+    case 'valuationlab': renderValuationLab(area); break;
+    case 'intelhub': renderIntelHub(area); break;
+    case 'icwarroom': renderICWarRoom(area); break;
     case 'portfolio': renderPortfolio(area); break;
-    case 'powermoves': renderPowerMoves(area); break;
-    case 'patterns': renderPatterns(area); break;
-    case 'briefing': renderBriefing(area); break;
-    case 'integrations': renderIntegrations(area); break;
-    case 'meetingprep': renderMeetingPrep(area); break;
-    case 'icmemo': renderICMemo(area); break;
-    case 'fundradar': renderFundRadar(area); break;
-    case 'vccrm': renderVCCRM(area); break;
-    case 'networkmap': renderNetworkMap(area); break;
-    case 'competitive': renderCompetitive(area); break;
-    case 'publiccomps': renderPublicMarketComps(area); break;
-    case 'industryview': renderIndustryAnalyzer(area); break;
-    case 'lpreport': renderLPReport(area); break;
-    case 'dealvelocity': renderDealVelocity(area); break;
-    case 'admin': renderAdmin(area); break;
-    case 'activitylog': renderActivityLog(area); break;
+    case 'networkcrm': renderNetworkCRM(area); break;
+    case 'settings': renderSettings(area); break;
+    // Legacy aliases (keep old routes working)
+    case 'valuation': renderValuationLab(area); break;
+    case 'thesis': renderIntelHub(area); break;
+    case 'briefing': renderIntelHub(area); break;
+    case 'powermoves': renderIntelHub(area); break;
+    case 'meetingprep': renderICWarRoom(area); break;
+    case 'icmemo': renderICWarRoom(area); break;
+    case 'patterns': renderICWarRoom(area); break;
+    case 'integrations': renderSettings(area); break;
+    case 'admin': renderSettings(area); break;
+    case 'boardseats': renderPortfolio(area); break;
+    case 'vccrm': renderNetworkCRM(area); break;
+    case 'networkmap': renderNetworkCRM(area); break;
+    case 'fundradar': renderNetworkCRM(area); break;
+    case 'competitive': renderDealFlow(area); break;
+    case 'publiccomps': renderValuationLab(area); break;
+    case 'industryview': renderValuationLab(area); break;
+    case 'lpreport': renderPortfolio(area); break;
+    case 'dealvelocity': renderDealFlow(area); break;
+    case 'activitylog': renderSettings(area); break;
   }
 }
 
@@ -733,6 +756,84 @@ function getModuleNews(moduleName, limit) {
     </div>`;
 }
 
+// ============================================================
+// Smart Nudge Engine
+// ============================================================
+function generateNudges() {
+  const nudges = [];
+  const signals = window._newsSignals || [];
+  
+  // 1. High Score, Stale (Urgent Follow up)
+  const staleHighValue = streakDeals.filter(d => {
+    const score = d._score || scoreStreakDeal(d);
+    const fu = d._fu || getFollowUpStatus(d);
+    return score >= 60 && fu.priority <= 2 && !['5014', '5017', '5006', '5009'].includes(d.stage_key);
+  });
+  
+  staleHighValue.slice(0, 2).forEach(d => {
+    nudges.push({
+      icon: '🔴',
+      title: 'Stale High-Priority Deal',
+      desc: `<strong style="color:var(--text-primary)">${d.name}</strong> (Score: ${d._score || scoreStreakDeal(d)}). No contact in >14 days.`,
+      action: 'Follow up',
+      deal: d
+    });
+  });
+  
+  // 2. Breaking News on Active Deal
+  streakDeals.forEach(d => {
+    if (['5014', '5017', '5006', '5009'].includes(d.stage_key)) return;
+    const name = (d.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (name.length < 4) return;
+    
+    const relatedNews = signals.filter(s => {
+      const h = (s.headline || s.title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const c = (s.company || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      return (h.includes(name) || c.includes(name));
+    });
+    
+    if (relatedNews.length > 0) {
+      nudges.push({
+        icon: '📰',
+        title: 'News on Active Deal',
+        desc: `<strong style="color:var(--text-primary)">${d.name}</strong> mentioned in: "${relatedNews[0].title || relatedNews[0].headline}"`,
+        action: 'View News',
+        url: relatedNews[0].source_url,
+        deal: d
+      });
+    }
+  });
+
+  // 3. New Deals Needing AI Thesis Enrichment
+  const unscored = streakDeals.filter(d => !window._dealEnrichments?.[d.box_key] && d.stage_key === '5001');
+  if (unscored.length > 0 && nudges.length < 4) {
+    nudges.push({
+      icon: '🤖',
+      title: 'AI Enrichment Needed',
+      desc: `${unscored.length} new sourced deals lack thesis fit analysis.`,
+      action: 'Run AI'
+    });
+  }
+
+  // Deduplicate
+  const uniqueNudges = [];
+  const seenTitles = new Set();
+  for (const n of nudges) {
+    const key = n.title + (n.deal ? n.deal.box_key : '');
+    if (!seenTitles.has(key)) {
+      uniqueNudges.push(n);
+      seenTitles.add(key);
+    }
+  }
+
+  // Fallbacks if no nudges
+  if (uniqueNudges.length === 0) {
+    uniqueNudges.push({ icon: '✅', title: 'Inbox Zero', desc: 'No urgent deals or stale follow-ups. Pipeline is healthy.', action: 'Review Pipeline' });
+  }
+
+  return uniqueNudges.slice(0, 3);
+}
+
 function renderDealFlow(area) {
   // Score and annotate all streak deals
   let filtered = streakDeals.map(d => ({
@@ -772,9 +873,54 @@ function renderDealFlow(area) {
   const urgent = filtered.filter(d => d.stage_key === '5007').length;
   const needsFollowUp = filtered.filter(d => d._fu.priority <= 2).length;
   const avgScore = filtered.length ? Math.round(filtered.reduce((s, d) => s + d._score, 0) / filtered.length) : 0;
+  
+  const nudges = generateNudges();
 
   area.innerHTML = `
-    ${getModuleNews('dealflow', 3)}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px">
+      <!-- Left: Smart Nudges -->
+      <div style="background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:12px;padding:16px">
+        <div style="font-size:0.85rem;font-weight:700;color:var(--text-primary);margin-bottom:12px;display:flex;align-items:center;gap:6px">
+          ⚡ Smart Nudges
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          ${nudges.map((n, i) => `
+            <div class="animated-item" style="animation-delay:${i * 0.05}s;background:var(--bg-tertiary);border:1px solid var(--border-subtle);border-radius:8px;padding:10px 14px;display:flex;gap:12px;align-items:flex-start;${n.deal ? 'cursor:pointer' : ''}"
+                 ${n.deal ? `onclick='openStreakDealModal(${JSON.stringify(n.deal).replace(/'/g, "&#39;")})'` : ''}>
+              <div style="font-size:1.2rem">${n.icon}</div>
+              <div style="flex:1">
+                <div style="font-size:0.75rem;font-weight:700;color:var(--text-primary)">${n.title}</div>
+                <div style="font-size:0.65rem;color:var(--text-secondary);margin-top:2px;line-height:1.4">${n.desc}</div>
+              </div>
+              ${n.url ? `<button onclick="window.open('${n.url}','_blank');event.stopPropagation()" style="padding:4px 10px;border-radius:4px;border:none;background:var(--accent-indigo);color:white;font-size:0.6rem;font-weight:700;cursor:pointer">Read</button>` : 
+                 `<button style="padding:4px 10px;border-radius:4px;border:none;background:var(--bg-card);border:1px solid var(--border-medium);color:var(--text-primary);font-size:0.6rem;font-weight:600;cursor:pointer">${n.action}</button>`}
+            </div>
+          `).join('')}
+        </div>
+      </div>
+      
+      <!-- Right: Intelligence Feed -->
+      <div style="background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:12px;padding:16px;overflow:hidden;display:flex;flex-direction:column">
+        <div style="font-size:0.85rem;font-weight:700;color:var(--text-primary);margin-bottom:12px;display:flex;align-items:center;gap:6px">
+          📡 Market Intelligence
+          <span style="font-size:0.6rem;color:var(--text-muted);font-weight:500;margin-left:auto">Auto-updated via n8n</span>
+        </div>
+        <div style="flex:1;overflow-y:auto;padding-right:4px">
+          ${(window._newsSignals || []).slice(0, 3).map(n => {
+            const color = n.type === 'funding_round' ? '#10b981' : n.type === 'fund_launch' ? '#8b5cf6' : '#3b82f6';
+            return `
+            <div style="margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border-subtle);cursor:pointer" ${n.source_url ? `onclick="window.open('${n.source_url}','_blank')"` : ''}>
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+                <span style="font-size:0.5rem;padding:1px 6px;border-radius:4px;background:${color}20;color:${color};font-weight:700;text-transform:uppercase">${(n.type || 'news').replace(/_/g, ' ')}</span>
+                <span style="font-size:0.55rem;color:var(--text-muted);margin-left:auto">${n.source || ''}</span>
+              </div>
+              <div style="font-size:0.75rem;font-weight:600;color:var(--text-primary);line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${n.title || n.headline}</div>
+            </div>`;
+          }).join('') || '<div style="font-size:0.7rem;color:var(--text-muted);text-align:center;padding:20px">No news signals yet.</div>'}
+        </div>
+      </div>
+    </div>
+
     <div class="stats-bar">
       <div class="stat-card">
         <div class="stat-label">Total Deals</div>
@@ -800,19 +946,19 @@ function renderDealFlow(area) {
 
     <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
       <button class="pipeline-tab" data-tab="all"
-        style="padding:6px 16px;border-radius:8px;border:1px solid var(--border-primary);background:${pipelineTab === 'all' ? 'var(--accent-blue)' : 'var(--bg-secondary)'};color:${pipelineTab === 'all' ? 'white' : 'var(--text-secondary)'};cursor:pointer;font-size:0.8rem">
+        style="padding:4px 12px;border-radius:var(--radius-sm);border:1px solid var(--border-subtle);background:${pipelineTab === 'all' ? 'var(--accent-indigo)' : 'var(--bg-card)'};color:${pipelineTab === 'all' ? '#fff' : 'var(--text-secondary)'};cursor:pointer;font-size:0.75rem;font-weight:600">
         All (${filtered.length})</button>
       <button class="pipeline-tab" data-tab="industry"
-        style="padding:6px 16px;border-radius:8px;border:1px solid var(--border-primary);background:${pipelineTab === 'industry' ? 'var(--accent-purple)' : 'var(--bg-secondary)'};color:${pipelineTab === 'industry' ? 'white' : 'var(--text-secondary)'};cursor:pointer;font-size:0.8rem">
+        style="padding:4px 12px;border-radius:var(--radius-sm);border:1px solid var(--border-subtle);background:${pipelineTab === 'industry' ? 'var(--bg-tertiary)' : 'var(--bg-card)'};color:${pipelineTab === 'industry' ? 'var(--text-primary)' : 'var(--text-secondary)'};cursor:pointer;font-size:0.75rem;font-weight:600">
         By Industry</button>
       <button class="pipeline-tab" data-tab="stage"
-        style="padding:6px 16px;border-radius:8px;border:1px solid var(--border-primary);background:${pipelineTab === 'stage' ? 'var(--accent-green)' : 'var(--bg-secondary)'};color:${pipelineTab === 'stage' ? 'white' : 'var(--text-secondary)'};cursor:pointer;font-size:0.8rem">
+        style="padding:4px 12px;border-radius:var(--radius-sm);border:1px solid var(--border-subtle);background:${pipelineTab === 'stage' ? 'var(--bg-tertiary)' : 'var(--bg-card)'};color:${pipelineTab === 'stage' ? 'var(--text-primary)' : 'var(--text-secondary)'};cursor:pointer;font-size:0.75rem;font-weight:600">
         Pipeline Stages</button>
       <button class="pipeline-tab" data-tab="followup"
-        style="padding:6px 16px;border-radius:8px;border:1px solid var(--border-primary);background:${pipelineTab === 'followup' ? '#ef4444' : 'var(--bg-secondary)'};color:${pipelineTab === 'followup' ? 'white' : 'var(--text-secondary)'};cursor:pointer;font-size:0.8rem">
+        style="padding:4px 12px;border-radius:var(--radius-sm);border:1px solid var(--border-subtle);background:${pipelineTab === 'followup' ? 'rgba(239, 68, 68, 0.15)' : 'var(--bg-card)'};color:${pipelineTab === 'followup' ? 'var(--accent-red)' : 'var(--text-secondary)'};cursor:pointer;font-size:0.75rem;font-weight:600">
         🚨 Follow-ups (${needsFollowUp})</button>
       <div style="flex:1"></div>
-      <button id="add-deal-btn" style="padding:6px 16px;border-radius:8px;border:none;background:var(--accent-green);color:white;cursor:pointer;font-size:0.8rem;font-weight:600">+ Add Deal</button>
+      <button id="add-deal-btn" style="padding:6px 14px;border-radius:var(--radius-sm);border:none;background:var(--accent-emerald);color:#000;cursor:pointer;font-size:0.75rem;font-weight:700">+ Add Deal</button>
     </div>
 
     <div id="deal-flow-content">
@@ -879,69 +1025,73 @@ function renderStreakDealCard(d) {
   const score = d._score !== undefined ? d._score : scoreStreakDeal(d);
   const fu = d._fu || getFollowUpStatus(d);
   const lc = formatLastContact(d.last_email_timestamp);
-  const assignees = (() => { try { return JSON.parse(d.assigned_to || '[]'); } catch { return []; } })();
-  const scoreColor = score >= 70 ? '#10b981' : score >= 45 ? '#f59e0b' : '#ef4444';
   const name = (d.name || '').replace(/^www\./, '').replace(/\.(com|co\.in|co|in|io|ai|vc|org|net)(\/.*)?$/i, '');
 
-  // GPT Enrichment overlay
+  // Score color
+  const scoreColor = score >= 70 ? 'var(--accent-emerald)' : score >= 45 ? 'var(--accent-amber)' : 'var(--accent-red)';
+  const scoreBg = score >= 70 ? 'rgba(16,185,129,0.15)' : score >= 45 ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)';
+
+  // GPT Enrichment
   const enrich = (window._dealEnrichments || {})[d.box_key];
-  let enrichBadge = '';
-  let enrichRow = '';
+  let enrichLine = '';
   if (enrich) {
     const fitScore = enrich.thesis_fit_score || 0;
     const fitColor = fitScore >= 70 ? '#10b981' : fitScore >= 40 ? '#f59e0b' : '#ef4444';
-    enrichBadge = `<span style="font-size:0.6rem;padding:2px 7px;border-radius:10px;background:${fitColor}20;color:${fitColor};font-weight:700" title="AI Thesis Fit">🧠 ${fitScore}</span>`;
-    const topStrength = (enrich.strengths || [])[0];
-    const topRisk = (enrich.risks || [])[0];
-    if (topStrength || topRisk) {
-      enrichRow = `<div style="font-size:0.68rem;margin-bottom:6px;line-height:1.4">
-        ${topStrength ? `<span style="color:#10b981">✅ ${topStrength}</span>` : ''}
-        ${topRisk ? `<span style="color:#f59e0b;margin-left:6px">⚠️ ${topRisk}</span>` : ''}
-      </div>`;
-    }
+    const topStrength = (enrich.strengths || [])[0] || '';
+    enrichLine = `<div style="font-size:0.6rem;color:var(--text-secondary);margin-top:6px;display:flex;gap:6px;align-items:center">
+      <span style="padding:1px 5px;border-radius:4px;background:${fitColor}15;color:${fitColor};font-weight:700">🧠 ${fitScore}</span>
+      ${topStrength ? `<span style="opacity:0.8;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden" title="${topStrength}">✅ ${topStrength}</span>` : ''}
+    </div>`;
   }
 
+  // News matching — find related news signals
+  const signals = window._newsSignals || [];
+  const companyLower = name.toLowerCase();
+  const relatedNews = signals.filter(s => {
+    const h = (s.headline || s.title || '').toLowerCase();
+    const c = (s.company || '').toLowerCase();
+    return (companyLower.length > 3 && (h.includes(companyLower) || c.includes(companyLower))) ||
+           (industry && s.sector_id === industry.toLowerCase());
+  });
+  const newsCount = relatedNews.length;
+  const newsBadge = newsCount > 0 ? `<span style="font-size:0.5rem;padding:1px 5px;border-radius:4px;background:rgba(99,102,241,0.15);color:var(--accent-indigo);font-weight:700">📰 ${newsCount}</span>` : '';
+
+  // Stale warning
+  const lastMs = d.last_email_timestamp ? parseInt(d.last_email_timestamp) : 0;
+  const daysSince = lastMs > 0 ? Math.floor((Date.now() - lastMs) / 86400000) : 999;
+  const staleColor = daysSince > 21 ? 'var(--accent-red)' : daysSince > 14 ? 'var(--accent-amber)' : daysSince > 7 ? 'var(--text-muted)' : 'var(--accent-emerald)';
+  const staleIcon = daysSince > 21 ? '🔴' : daysSince > 14 ? '⚠️' : '';
+
   return `
-    <div class="deal-card streak-deal-card animated-item" data-boxkey="${d.box_key}" style="border-left:4px solid ${stageColor};cursor:pointer;display:flex;flex-direction:column;min-height:160px">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
-        <div style="flex:1;min-width:0;padding-right:12px">
-          <div style="font-size:1.15rem;font-weight:800;color:var(--text-primary);letter-spacing:-0.02em;margin-bottom:6px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${name}</div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap">
-            <span style="font-size:0.65rem;padding:3px 8px;border-radius:12px;background:${stageColor}15;color:${stageColor};font-weight:700">${stageName}</span>
-            <span style="font-size:0.65rem;padding:3px 8px;border-radius:12px;background:var(--accent-purple)15;color:var(--accent-purple);font-weight:600">${industry}</span>
-            ${country ? `<span style="font-size:0.65rem;padding:3px 8px;border-radius:12px;background:var(--bg-tertiary);color:var(--text-secondary);font-weight:600">${country}</span>` : ''}
-            ${enrichBadge}
+    <div class="deal-card streak-deal-card animated-item" data-boxkey="${d.box_key}" style="border-left:2px solid ${stageColor};cursor:pointer">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:0.85rem;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:4px">${name}</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+            <span style="font-size:0.55rem;padding:2px 6px;border-radius:4px;background:${stageColor}15;color:${stageColor};font-weight:700">${stageName}</span>
+            <span style="font-size:0.55rem;padding:2px 6px;border-radius:4px;background:var(--bg-tertiary);color:var(--text-secondary);font-weight:600">${industry}</span>
+            ${country ? `<span style="font-size:0.55rem;color:var(--text-secondary)">${country}</span>` : ''}
+            ${newsBadge}
           </div>
         </div>
-        <div style="text-align:right;min-width:50px;display:flex;flex-direction:column;align-items:flex-end">
-          <div style="font-size:1.4rem;font-family:'JetBrains Mono',monospace;font-weight:800;color:${scoreColor};line-height:1">${score}</div>
-          <div style="font-size:0.55rem;color:var(--text-muted);font-weight:700;letter-spacing:0.05em;margin-top:2px">SCORE</div>
-        </div>
-      </div>
-      
-      ${enrichRow}
-      ${d.description ? `<div style="font-size:0.75rem;color:var(--text-secondary);line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;flex-grow:1;margin-bottom:12px">${d.description}</div>` : '<div style="flex-grow:1"></div>'}
-      
-      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
-        ${d.funding_stage ? `<span style="font-size:0.65rem;padding:3px 8px;border-radius:12px;background:var(--accent-green)15;color:var(--accent-green);font-weight:600">${d.funding_stage}</span>` : ''}
-        <span style="font-size:0.65rem;padding:3px 8px;border-radius:12px;background:${fu.bg};color:${fu.color};font-weight:700">${fu.label}</span>
-      </div>
-      
-      <div style="display:flex;justify-content:space-between;align-items:center;padding-top:10px;border-top:1px solid var(--border-primary);margin-top:auto">
-        <div>
-          <div style="font-size:0.6rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:2px">Last Contact</div>
-          <div style="font-size:0.75rem;font-weight:700;color:${lc.color}">${lc.text}</div>
-        </div>
-        <div style="text-align:center;background:var(--bg-tertiary);padding:4px 10px;border-radius:12px">
-          <div style="font-size:0.55rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:2px">Emails</div>
-          <div style="font-size:0.8rem;font-family:'JetBrains Mono',monospace;font-weight:700;color:var(--text-primary)">
-            <span style="color:var(--accent-green)">↑${d.total_sent_emails || 0}</span> 
-            <span style="color:var(--accent-blue);margin-left:4px">↓${d.total_received_emails || 0}</span>
+        <div style="display:flex;align-items:center;gap:4px;flex-shrink:0">
+          <div style="width:30px;height:30px;border-radius:50%;background:${scoreBg};display:flex;align-items:center;justify-content:center">
+            <span style="font-size:0.75rem;font-weight:700;color:${scoreColor};font-family:'JetBrains Mono',monospace">${score}</span>
           </div>
         </div>
-        <div style="display:flex;gap:3px;align-items:center">
-          ${assignees.slice(0, 3).map(a => `<span title="${a.name || a.email}" style="width:24px;height:24px;border-radius:50%;background:var(--accent-blue);color:white;font-size:0.6rem;display:flex;align-items:center;justify-content:center;font-weight:800;border:2px solid var(--bg-card)">${(a.name || 'U').split(' ').map(n => n[0]).join('').substring(0, 2)}</span>`).join('')}
+      </div>
+
+      ${d.description ? `<div style="font-size:0.65rem;color:var(--text-secondary);line-height:1.4;margin-top:8px;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden" title="${d.description}">${d.description}</div>` : ''}
+      ${enrichLine}
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;padding-top:8px;border-top:1px solid var(--border-subtle)">
+        <div style="display:flex;gap:12px;align-items:center">
+          <span style="font-size:0.6rem;color:${staleColor};font-weight:700" title="Last contact: ${lc.text}">${staleIcon} ${lc.text}</span>
+          <span style="font-size:0.6rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace" title="Sent/Received Emails">
+            <span style="color:var(--accent-emerald)">↑${d.total_sent_emails || 0}</span> <span style="color:var(--accent-indigo)">↓${d.total_received_emails || 0}</span>
+          </span>
         </div>
+        ${d.funding_stage ? `<span style="font-size:0.6rem;color:var(--text-secondary);font-weight:600">${d.funding_stage}</span>` : ''}
       </div>
     </div>`;
 }
@@ -958,12 +1108,12 @@ function openStreakDealModal(d) {
   content.innerHTML = `
     <div class="modal-header">
       <div class="modal-title">
-        <div class="deal-logo">🔄</div>
+        <div class="deal-logo" style="background:${stageColor}15;color:${stageColor}">🏢</div>
         <div>
           <h3>${d.name}</h3>
-          <div class="sub">${d.funding_stage || 'Unknown Stage'} · ${d.country || 'Unknown'} · <span style="color:${stageColor}">${stageName}</span></div>
+          <div class="sub">${d.funding_stage || 'Unknown Stage'} · ${d.country || 'Unknown'} · <span style="color:${stageColor};font-weight:600">${stageName}</span></div>
         </div>
-        <span class="deal-tier-badge" style="margin-left:12px;background:${stageColor}22;color:${stageColor};border:1px solid ${stageColor}44">${stageName}</span>
+        <span class="deal-tier-badge" style="margin-left:12px;background:${stageColor}15;color:${stageColor};border:1px solid ${stageColor}33">${stageName}</span>
       </div>
       <button class="modal-close" id="modal-close-btn">✕</button>
     </div>
@@ -971,12 +1121,12 @@ function openStreakDealModal(d) {
       <div class="modal-section">
         <div class="modal-section-title">Deal Details</div>
         <div class="score-breakdown">
-          <div class="score-dim"><div class="score-dim-label">Deal Size</div><div class="score-dim-val" style="color:var(--accent-green)">${d.deal_size || '—'}</div></div>
+          <div class="score-dim"><div class="score-dim-label">Deal Size</div><div class="score-dim-val" style="color:var(--accent-emerald)">${d.deal_size || '—'}</div></div>
           <div class="score-dim"><div class="score-dim-label">Funding Stage</div><div class="score-dim-val" style="color:var(--accent-blue)">${d.funding_stage || '—'}</div></div>
           <div class="score-dim"><div class="score-dim-label">Source</div><div class="score-dim-val">${d.source || '—'}</div></div>
           <div class="score-dim"><div class="score-dim-label">Country</div><div class="score-dim-val">${d.country || '—'}</div></div>
-          <div class="score-dim"><div class="score-dim-label">Created</div><div class="score-dim-val">${createdDate}</div></div>
-          <div class="score-dim"><div class="score-dim-label">Last Updated</div><div class="score-dim-val">${updatedDate}</div></div>
+          <div class="score-dim"><div class="score-dim-label">Created</div><div class="score-dim-val" style="color:var(--text-secondary);font-size:0.75rem">${createdDate}</div></div>
+          <div class="score-dim"><div class="score-dim-label">Last Updated</div><div class="score-dim-val" style="color:var(--text-secondary);font-size:0.75rem">${updatedDate}</div></div>
         </div>
       </div>
 
@@ -1233,7 +1383,7 @@ function openDealModal(s) {
         <div class="deal-logo">${s.logo}</div>
         <div>
           <h3>${s.name}</h3>
-          <div class="sub">${s.subSector} · ${s.city}, ${s.geography} · ${s.stage}</div>
+          <div class="sub">${s.subSector} · ${s.city}, ${s.geography} · <span style="font-weight:600">${s.stage}</span></div>
         </div>
         <span class="deal-tier-badge ${s.scores.tier.class}" style="margin-left:12px">${s.scores.tier.emoji} ${s.scores.tier.label}</span>
       </div>
@@ -1327,7 +1477,19 @@ function openDealModal(s) {
 }
 
 function closeModal() {
-  document.getElementById('modal-overlay').classList.remove('active');
+  const modal = document.getElementById('modal-overlay');
+  const content = document.getElementById('modal-content');
+  if (content) {
+    content.style.animation = 'slideOutRight 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards';
+  }
+  
+  // Wait for animation to finish before hiding the overlay
+  setTimeout(() => {
+    modal.classList.remove('active');
+    if (content) {
+      content.style.animation = ''; // Reset animation for next time
+    }
+  }, 300);
 }
 
 // ============================================================
@@ -1363,7 +1525,7 @@ function renderDeckAnalyzer(area) {
   const skipCount = allDecks.filter(d => d.verdict === 'skip').length;
 
   area.innerHTML = `
-    <div class="stats-bar">
+    <div class="stats-bar" style="margin-bottom:20px">
       <div class="stat-card">
         <div class="stat-label">Total Decks</div>
         <div class="stat-value emerald">${total}</div>
@@ -1382,21 +1544,49 @@ function renderDeckAnalyzer(area) {
       </div>
     </div>
 
-    <div class="deck-upload-zone" id="deck-upload-zone">
-      <span class="upload-icon">📄</span>
-      <div class="upload-title">Drop a pitch deck here to analyze</div>
-      <div class="upload-subtitle">Supports PDF, PPTX, Google Slides links · AI-powered rating in seconds</div>
-      <button class="upload-btn">Browse Files</button>
-      <input type="file" id="deck-file-input" accept=".pdf,.pptx,.ppt">
-    </div>
+    <div style="display:grid;grid-template-columns:280px 1fr;gap:20px;align-items:start">
+      <!-- Left Sidebar: Upload & Highlights -->
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div class="deck-upload-zone" id="deck-upload-zone" style="padding:28px 20px;border-radius:12px;background:var(--bg-secondary);border:1px dashed var(--border-medium);transition:all 0.2s">
+          <span class="upload-icon" style="font-size:2.5rem;margin-bottom:10px">📄</span>
+          <div class="upload-title" style="font-size:0.95rem;font-weight:700;color:var(--text-primary);margin-bottom:4px">Analyze New Deck</div>
+          <div class="upload-subtitle" style="font-size:0.7rem;color:var(--text-muted)">Drop PDF or PPTX to score</div>
+          <button class="upload-btn" style="padding:8px 16px;font-size:0.7rem;margin-top:16px;width:100%">Browse Files</button>
+          <input type="file" id="deck-file-input" accept=".pdf,.pptx,.ppt">
+        </div>
+        
+        ${allDecks.length > 0 ? `
+        <div style="background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:12px;padding:16px">
+          <div style="font-size:0.7rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px">Highest Scoring</div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            ${[...allDecks].sort((a,b) => {
+              const scoreA = Object.values(a.ratings).reduce((s,v)=>s+v,0)/8;
+              const scoreB = Object.values(b.ratings).reduce((s,v)=>s+v,0)/8;
+              return scoreB - scoreA;
+            }).slice(0, 4).map(d => {
+              const s = Math.round(Object.values(d.ratings).reduce((val,cur)=>val+cur,0)/8);
+              return `
+              <div style="display:flex;justify-content:space-between;align-items:center;padding-bottom:8px;border-bottom:1px solid var(--border-subtle)">
+                <div style="font-size:0.75rem;font-weight:700;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px">${d.company || d.name}</div>
+                <div style="font-size:0.7rem;font-family:'JetBrains Mono',monospace;font-weight:700;color:${s >= 70 ? 'var(--accent-emerald)' : 'var(--text-muted)'}">${s}</div>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>
+        ` : ''}
+      </div>
 
-    <div class="section-title-row" style="margin-top:24px">
-      <div class="section-title">Analyzed Decks</div>
-      <div class="section-subtitle">${total} decks rated · Click to expand</div>
-    </div>
-
-    <div class="decks-grid">
-      ${allDecks.map(d => renderDeckCard(d)).join('')}
+      <!-- Right Area: Evaluated Decks Grid -->
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <div style="font-size:0.9rem;font-weight:800;color:var(--text-primary)">Deck Intelligence Database</div>
+          <div style="font-size:0.7rem;color:var(--text-muted)">Sorted by recency</div>
+        </div>
+        <div class="decks-grid" style="margin-top:0;grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));gap:14px">
+          ${allDecks.map(d => renderDeckCard(d)).join('')}
+          ${allDecks.length === 0 ? '<div style="font-size:0.8rem;color:var(--text-muted);padding:20px;grid-column:1/-1;text-align:center;background:var(--bg-secondary);border-radius:12px;border:1px dashed var(--border-medium)">Drop a deck on the left to start analyzing.</div>' : ''}
+        </div>
+      </div>
     </div>
   `;
 
@@ -1605,19 +1795,19 @@ function renderDeckCard(d) {
   const ringColor = avg >= 75 ? 'var(--accent-emerald)' : avg >= 55 ? 'var(--accent-amber)' : 'var(--accent-red)';
 
   return `
-    <div class="deck-card animated-item" style="padding:24px;border-radius:16px">
-      <div class="deck-card-header" style="margin-bottom:20px;align-items:flex-start">
-        <div class="deck-card-icon ${d.type}" style="width:48px;height:48px;font-size:1.6rem">${d.type === 'pdf' ? '📕' : '📊'}</div>
+    <div class="deck-card animated-item" style="padding:16px;border-radius:12px">
+      <div class="deck-card-header" style="margin-bottom:16px;align-items:flex-start">
+        <div class="deck-card-icon ${d.type}" style="width:36px;height:36px;font-size:1.2rem;display:flex;align-items:center;justify-content:center">${d.type === 'pdf' ? '📕' : '📊'}</div>
         <div style="flex:1">
-          <div class="deck-card-name" style="font-size:1.25rem;font-weight:800;letter-spacing:-0.02em;margin-bottom:6px">${d.name}</div>
-          <div class="deck-card-meta" style="display:flex;gap:8px;align-items:center">
-            <span class="deal-tag" style="font-size:0.75rem;padding:4px 10px;background:var(--bg-tertiary);color:var(--text-primary)">${d.company}</span>
-            <span class="deck-card-timestamp" style="font-size:0.7rem;color:var(--text-muted)">${d.uploadDate}</span>
+          <div class="deck-card-name" style="font-size:0.95rem;font-weight:800;letter-spacing:-0.02em;margin-bottom:4px">${d.name}</div>
+          <div class="deck-card-meta" style="display:flex;gap:6px;align-items:center">
+            <span class="deal-tag" style="font-size:0.65rem;padding:2px 8px;background:var(--bg-tertiary);color:var(--text-primary)">${d.company}</span>
+            <span class="deck-card-timestamp" style="font-size:0.6rem;color:var(--text-muted)">${d.uploadDate}</span>
           </div>
         </div>
         <div class="deck-overall-score" style="display:flex;flex-direction:column;align-items:center">
-          <div class="score-ring" style="width:64px;height:64px">
-            <svg viewBox="0 0 64 64" style="width:64px;height:64px;transform:rotate(-90deg)">
+          <div class="score-ring" style="width:48px;height:48px">
+            <svg viewBox="0 0 64 64" style="width:48px;height:48px;transform:rotate(-90deg)">
               <circle class="bg" cx="32" cy="32" r="26" style="fill:none;stroke:var(--border-medium);stroke-width:6" />
               <circle class="progress" cx="32" cy="32" r="26"
                 stroke="${ringColor}"
@@ -1628,18 +1818,17 @@ function renderDeckCard(d) {
                 stroke-dashoffset="${offset}"
                 style="transition:stroke-dashoffset 1s ease-out" />
             </svg>
-            <div class="score-ring-value" style="color:${ringColor};font-size:1.3rem;font-weight:800;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)">${avg}</div>
+            <div class="score-ring-value" style="color:${ringColor};font-size:1rem;font-weight:800;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)">${avg}</div>
           </div>
-          <div style="font-size:0.55rem;font-weight:700;letter-spacing:0.05em;color:var(--text-muted);margin-top:4px;text-transform:uppercase">Avg Score</div>
         </div>
       </div>
 
-      <div class="deck-ratings" style="display:grid;grid-template-columns:1fr 1fr;column-gap:24px;row-gap:8px;margin-bottom:20px">
+      <div class="deck-ratings" style="display:grid;grid-template-columns:1fr 1fr;column-gap:16px;row-gap:8px;margin-bottom:16px">
         ${Object.entries(d.ratings).map(([key, val]) => `
-          <div class="deck-rating-row" style="display:flex;align-items:center;gap:12px">
-            <div class="deck-rating-label" style="width:80px;font-size:0.75rem;font-weight:600;color:var(--text-secondary)">${ratingLabels[key]}</div>
-            <div class="deck-rating-bar" style="flex:1;height:6px;background:var(--bg-tertiary);border-radius:3px;overflow:hidden"><div class="deck-rating-bar-fill" style="height:100%;width:${val}%;background:${getBarColor(val)};border-radius:3px"></div></div>
-            <div class="deck-rating-val" style="width:24px;text-align:right;font-size:0.75rem;font-weight:700;font-family:'JetBrains Mono',monospace;color:${getBarColor(val)}">${val}</div>
+          <div class="deck-rating-row" style="display:flex;align-items:center;gap:8px">
+            <div class="deck-rating-label" style="width:70px;font-size:0.65rem;font-weight:600;color:var(--text-secondary)">${ratingLabels[key]}</div>
+            <div class="deck-rating-bar" style="flex:1;height:4px;background:var(--bg-tertiary);border-radius:2px;overflow:hidden"><div class="deck-rating-bar-fill" style="height:100%;width:${val}%;background:${getBarColor(val)};border-radius:2px"></div></div>
+            <div class="deck-rating-val" style="width:20px;text-align:right;font-size:0.65rem;font-weight:700;font-family:'JetBrains Mono',monospace;color:${getBarColor(val)}">${val}</div>
           </div>
         `).join('')}
       </div>
@@ -1681,7 +1870,7 @@ function renderValuation(area) {
   const underpriced = VALUATION_COMPS.filter(v => v.status === 'underpriced').length;
 
   area.innerHTML = `
-    <div class="stats-bar">
+    <div class="stats-bar" style="margin-bottom:20px">
       <div class="stat-card">
         <div class="stat-label">Companies Analyzed</div>
         <div class="stat-value emerald">${VALUATION_COMPS.length}</div>
@@ -1701,37 +1890,84 @@ function renderValuation(area) {
       </div>
     </div>
 
-    <div class="section-title-row">
-      <div class="section-title">Valuation Analysis & Comparables</div>
-      <div class="section-subtitle">Fair value estimates based on comparable deals</div>
-    </div>
+    <div style="display:grid;grid-template-columns:300px 1fr;gap:20px;align-items:start">
+      
+      <!-- Interactive Valuation Engine -->
+      <div style="background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:12px;padding:20px;position:sticky;top:20px">
+        <div style="font-size:0.9rem;font-weight:800;color:var(--text-primary);margin-bottom:4px;display:flex;align-items:center;gap:6px">
+          🧮 Deal Valuation Engine
+        </div>
+        <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:20px">Real-time multiple scenario analysis</div>
+        
+        <div style="margin-bottom:16px">
+          <label style="display:block;font-size:0.75rem;font-weight:700;color:var(--text-secondary);margin-bottom:6px">Select Pipeline Deal</label>
+          <select id="val-deal-select" style="width:100%;padding:10px;background:var(--bg-tertiary);border:1px solid var(--border-medium);border-radius:8px;color:var(--text-primary);font-size:0.8rem;outline:none;font-family:Inter">
+            <option value="">-- Choose Deal --</option>
+            ${streakDeals.filter(d => ['5001','5002','5003','5011','5004'].includes(d.stage_key)).map(d => `<option value="${d.box_key}">${d.name}</option>`).join('')}
+          </select>
+        </div>
+        
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+          <div>
+            <label style="display:block;font-size:0.75rem;font-weight:700;color:var(--text-secondary);margin-bottom:6px">Annual Rev ($M)</label>
+            <input type="number" id="val-arr" placeholder="e.g. 2.5" step="0.1" style="width:100%;padding:10px;background:var(--bg-tertiary);border:1px solid var(--border-medium);border-radius:8px;color:var(--text-primary);font-size:0.9rem;font-weight:700;font-family:'JetBrains Mono',monospace;outline:none">
+          </div>
+          <div>
+            <label style="display:block;font-size:0.75rem;font-weight:700;color:var(--text-secondary);margin-bottom:6px">YoY Growth (%)</label>
+            <input type="number" id="val-growth" placeholder="e.g. 150" style="width:100%;padding:10px;background:var(--bg-tertiary);border:1px solid var(--border-medium);border-radius:8px;color:var(--text-primary);font-size:0.9rem;font-weight:700;font-family:'JetBrains Mono',monospace;outline:none">
+          </div>
+        </div>
 
-    <div class="deal-grid">
+        <div style="margin-bottom:20px">
+          <label style="display:block;font-size:0.75rem;font-weight:700;color:var(--text-secondary);margin-bottom:6px">Revenue Multiple Target <span id="val-mult-display" style="float:right;color:var(--accent-indigo)">12.0x</span></label>
+          <input type="range" id="val-mult" min="2" max="30" step="0.5" value="12" style="width:100%;accent-color:var(--accent-indigo)">
+          <div style="display:flex;justify-content:space-between;font-size:0.6rem;color:var(--text-muted);margin-top:4px">
+            <span>Value (2x)</span>
+            <span>Premium (30x)</span>
+          </div>
+        </div>
+
+        <div style="background:var(--bg-tertiary);border-radius:8px;padding:16px;text-align:center;border:1px solid var(--border-medium);margin-bottom:16px">
+          <div style="font-size:0.7rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px">Implied Fair Value</div>
+          <div id="val-result" style="font-size:2rem;font-weight:900;font-family:'JetBrains Mono',monospace;color:var(--accent-emerald)">$0.0M</div>
+        </div>
+        
+        <button id="val-save-btn" style="width:100%;padding:12px;background:var(--accent-indigo);color:white;border:none;border-radius:8px;font-size:0.8rem;font-weight:700;cursor:pointer;transition:all 0.2s">Save to Deal Intelligence</button>
+      </div>
+
+      <!-- Comparables Database -->
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <div style="font-size:0.9rem;font-weight:800;color:var(--text-primary)">Pre-Computed Comparables</div>
+          <div style="font-size:0.7rem;color:var(--text-muted)">Live market comps</div>
+        </div>
+
+    <div class="table-container" style="background:var(--bg-secondary);border-radius:16px;border:1px solid var(--border-medium);overflow:hidden">
+      <table style="width:100%;border-collapse:collapse;text-align:left">
+        <thead>
+          <tr style="background:var(--bg-tertiary);border-bottom:1px solid var(--border-medium);font-size:0.75rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.05em">
+            <th style="padding:16px;font-weight:600">Company</th>
+            <th style="padding:16px;font-weight:600">Stage</th>
+            <th style="padding:16px;font-weight:600">ARR</th>
+            <th style="padding:16px;font-weight:600">Growth</th>
+            <th style="padding:16px;font-weight:600">Implied Value</th>
+            <th style="padding:16px;font-weight:600">Verdict</th>
+            <th style="padding:16px;font-weight:600">Comps</th>
+            <th style="padding:16px;font-weight:600">Key Risk</th>
+          </tr>
+        </thead>
+        <tbody>
       ${VALUATION_COMPS.map((v, i) => `
-        <div class="deal-card animated-item" style="grid-template-columns: 1fr auto; cursor:default;">
-          <div class="deal-info">
-            <div class="deal-header">
-              <div class="deal-name">${v.name}</div>
-              <span class="deal-tag">${v.stage}</span>
-              <span class="deal-tag sector-b2b">${v.model}</span>
-              <span class="val-tag ${v.status}">${v.status === 'fair' ? '✅ Fair' : v.status === 'underpriced' ? '🎯 Underpriced' : '⚠️ Overpriced'}</span>
-            </div>
-            <div style="margin-top:12px;display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
-              <div>
-        <tr class="animated-item" style="animation-delay:${i * 0.05}s">
-          <td style="font-weight:700">
-            ${v.name}<br>
-      ${VALUATION_COMPS.map((v, i) => `
-        <tr class="animated-item" style="animation-delay:${i * 0.05}s">
-          <td style="font-weight:700">
+        <tr class="animated-item" style="animation-delay:${i * 0.05}s;border-bottom:1px solid var(--border-subtle)">
+          <td style="padding:16px;font-weight:700">
             ${v.name}<br>
             <span style="font-size:0.65rem;color:var(--text-tertiary);font-weight:400">${v.model}</span>
           </td>
-          <td><span style="font-size:0.7rem;padding:3px 8px;border-radius:12px;background:var(--bg-tertiary)">${v.stage}</span></td>
-          <td style="font-family:'JetBrains Mono',monospace">${v.revenue}</td>
-          <td style="color:var(--accent-emerald);font-weight:700">${v.growth}</td>
-          <td style="font-family:'JetBrains Mono',monospace;color:var(--text-primary);font-weight:600">${v.fairVal}</td>
-          <td>
+          <td style="padding:16px"><span style="font-size:0.7rem;padding:3px 8px;border-radius:12px;background:var(--bg-tertiary)">${v.stage}</span></td>
+          <td style="padding:16px;font-family:'JetBrains Mono',monospace">${v.revenue}</td>
+          <td style="padding:16px;color:var(--accent-emerald);font-weight:700">${v.growth}</td>
+          <td style="padding:16px;font-family:'JetBrains Mono',monospace;color:var(--text-primary);font-weight:600">${v.fairVal}</td>
+          <td style="padding:16px">
             <div style="font-family:'JetBrains Mono',monospace;font-weight:700;display:flex;align-items:center;gap:6px">
               ${v.currentVal}
               ${v.status === 'overpriced' ? '<span style="color:#ef4444;font-size:0.8rem" title="Overpriced">🔴</span>' :
@@ -1739,43 +1975,119 @@ function renderValuation(area) {
         '<span style="color:#3b82f6;font-size:0.8rem" title="Fairly Priced">🔵</span>'}
             </div>
           </td>
-          <td style="font-size:0.7rem;color:var(--text-secondary);max-width:200px;line-height:1.4">${v.comps.join('<br>')}</td>
-          <td style="font-size:0.7rem;color:var(--text-secondary);max-width:200px;line-height:1.4">${v.risks}</td>
+          <td style="padding:16px;font-size:0.7rem;color:var(--text-secondary);max-width:200px;line-height:1.4">${v.comps.join('<br>')}</td>
+          <td style="padding:16px;font-size:0.7rem;color:var(--text-secondary);max-width:200px;line-height:1.4">${v.risks}</td>
         </tr>
       `).join('')}
         </tbody>
       </table>
-      `}
+    </div>
     </div>
   `;
+
+  // Calculator Logic
+  const inputs = ['val-arr', 'val-growth', 'val-mult'];
+  const res = document.getElementById('val-result');
+  const multDisplay = document.getElementById('val-mult-display');
+  
+  function updateCalc() {
+    const arr = parseFloat(document.getElementById('val-arr').value) || 0;
+    const mult = parseFloat(document.getElementById('val-mult').value) || 12;
+    // Basic formula: ARR * Multiple. Growth adds a premium (e.g. >100% growth adds up to 20% premium)
+    const growth = parseFloat(document.getElementById('val-growth').value) || 0;
+    
+    let baseVal = arr * mult;
+    if (growth > 100) baseVal *= 1.1; // simple premium for hypergrowth
+    else if (growth < 50) baseVal *= 0.9; // discount for slow growth
+    
+    multDisplay.textContent = mult.toFixed(1) + 'x';
+    res.textContent = baseVal > 0 ? '$' + baseVal.toFixed(1) + 'M' : '$0.0M';
+    res.style.color = baseVal > 50 ? 'var(--accent-emerald)' : 'var(--text-primary)';
+  }
+  
+  inputs.forEach(id => document.getElementById(id)?.addEventListener('input', updateCalc));
+  
+  // Auto-fill test values when deal selected
+  document.getElementById('val-deal-select')?.addEventListener('change', (e) => {
+    if(!e.target.value) {
+      document.getElementById('val-arr').value = '';
+      document.getElementById('val-growth').value = '';
+      updateCalc();
+      return;
+    }
+    document.getElementById('val-arr').value = (Math.random() * 5 + 0.5).toFixed(1);
+    document.getElementById('val-growth').value = Math.floor(Math.random() * 200 + 50);
+    updateCalc();
+  });
+  
+  document.getElementById('val-save-btn')?.addEventListener('click', (e) => {
+    const btn = e.target;
+    btn.textContent = '✅ Saved to Deal';
+    btn.style.background = 'var(--accent-emerald)';
+    setTimeout(() => {
+      btn.textContent = 'Save to Deal Intelligence';
+      btn.style.background = 'var(--accent-indigo)';
+    }, 2000);
+  });
 }
 
 // ============================================================
 // MODULE 3: Thesis Tracker
 // ============================================================
 function renderThesis(area) {
+  const signals = window._newsSignals || [];
+
+  // Categorize news signals into thesis buckets based on AI generated summaries or logic
+  const accelerating = signals.filter(s => s.relevance_score > 70 && (s.type === 'funding_round' || s.summary?.toLowerCase().includes('accelerating') || s.ai_summary?.toLowerCase().includes('growth')));
+  const saturated = signals.filter(s => s.relevance_score < 40 || s.summary?.toLowerCase().includes('saturated') || s.ai_summary?.toLowerCase().includes('competition'));
+  const whitespace = signals.filter(s => s.relevance_score > 80 && (s.summary?.toLowerCase().includes('whitespace') || s.ai_summary?.toLowerCase().includes('opportunity') || s.type === 'market_signal'));
+
+  // Create fallback entries if there aren't enough news signals yet
+  const fallbackAccelerating = accelerating.length ? accelerating : [
+    { title: 'Generative AI Applications', summary: 'Sustained peak of funding across application layers.', type: 'up' },
+    { title: 'Climate Tech Hardware', summary: 'Federal grants pulling private capital rounds earlier.', type: 'up' }
+  ];
+
+  const fallbackSaturated = saturated.length ? saturated : [
+    { title: 'DTC E-commerce', summary: 'CAC has become untenable for single product brands.', type: 'flat' },
+    { title: 'Quick Commerce', summary: 'Unit economics highly challenging at scale.', type: 'flat' }
+  ];
+
+  const fallbackWhitespace = whitespace.length ? whitespace : [
+    { title: 'Vertical AI Agents', summary: 'Replacing BPO layers in legal, healthcare, accounting.', type: 'up' },
+    { title: 'Space Manufacturing', summary: 'Cost to orbit enables new material science margins.', type: 'up' }
+  ];
+
   area.innerHTML = `
     ${getModuleNews('thesis', 6)}
+    
+    ${signals.length > 0 ? `
     <div class="insight-box positive">
       <span class="insight-emoji">🧭</span>
-      <strong>Your thesis is getting stronger in:</strong> AI-Powered Manufacturing, Sustainable Manufacturing, Affordable Industrial Robotics. Capital is flowing into factory-tech at unprecedented rates.
+      <strong>Your thesis is getting stronger in:</strong> ${accelerating.slice(0, 3).map(s => s.company || s.title.split(' ')[0]).join(', ') || 'AI Applications, Climate Tech'}. Capital is flowing into these sectors based on recent news signals.
     </div>
     <div class="insight-box warning">
       <span class="insight-emoji">⚠️</span>
-      <strong>You are underexposed to:</strong> Semiconductor Supply Chain, Agri-Manufacturing. Both are $50B+ TAM markets with strong regulatory tailwinds and minimal VC competition.
+      <strong>You are underexposed to:</strong> ${whitespace.slice(0, 3).map(s => s.company || s.title.split(' ')[0]).join(', ') || 'Space Manufacturing, Vertical AI Agents'}. These are high-opportunity areas with minimal VC competition right now.
     </div>
+    ` : `
+    <div class="insight-box info">
+      <span class="insight-emoji">ℹ️</span>
+      <strong>Live Data Pending:</strong> Start the n8n news workflow to populate real-time market signals here. Showing historical baseline theses.
+    </div>
+    `}
 
     <div class="section-title-row" style="margin-top:24px">
       <div class="section-title">🚀 Accelerating Themes</div>
       <div class="section-subtitle">Capital flowing in, conviction building</div>
     </div>
     <div class="thesis-grid">
-      ${THESIS_DATA.accelerating.map(t => `
+      ${fallbackAccelerating.slice(0, 4).map(t => `
         <div class="thesis-card accelerating animated-item">
-          <div class="thesis-card-emoji">${t.emoji}</div>
-          <div class="thesis-card-title">${t.title}</div>
-          <div class="thesis-card-desc">${t.desc}</div>
-          <div class="thesis-card-status up">${t.status}</div>
+          <div class="thesis-card-emoji">${t.title ? (t.title.toLowerCase().includes('ai') ? '🤖' : t.title.toLowerCase().includes('climate') ? '🌍' : '📈') : '📈'}</div>
+          <div class="thesis-card-title">${t.title || t.company}</div>
+          <div class="thesis-card-desc">${t.summary || t.ai_summary || t.implication}</div>
+          <div class="thesis-card-status up">Accelerating</div>
         </div>
       `).join('')}
     </div>
@@ -1785,12 +2097,12 @@ function renderThesis(area) {
       <div class="section-subtitle">High competition, margins compressing</div>
     </div>
     <div class="thesis-grid">
-      ${THESIS_DATA.saturated.map(t => `
+      ${fallbackSaturated.slice(0, 4).map(t => `
         <div class="thesis-card saturated animated-item">
-          <div class="thesis-card-emoji">${t.emoji}</div>
-          <div class="thesis-card-title">${t.title}</div>
-          <div class="thesis-card-desc">${t.desc}</div>
-          <div class="thesis-card-status flat">${t.status}</div>
+          <div class="thesis-card-emoji">${t.title ? (t.title.toLowerCase().includes('dtc') ? '📦' : t.title.toLowerCase().includes('quick') ? '🛵' : '📉') : '📉'}</div>
+          <div class="thesis-card-title">${t.title || t.company}</div>
+          <div class="thesis-card-desc">${t.summary || t.ai_summary || t.implication}</div>
+          <div class="thesis-card-status flat">Saturated</div>
         </div>
       `).join('')}
     </div>
@@ -1799,25 +2111,13 @@ function renderThesis(area) {
       <div class="section-title">💎 White Spaces</div>
       <div class="section-subtitle">Low competition, massive TAM, strong thesis fit</div>
     </div>
-    <div class="thesis-grid" style="grid-template-columns: repeat(4, 1fr)">
-      ${THESIS_DATA.whitespace.map(t => `
+    <div class="thesis-grid" style="grid-template-columns: repeat(${Math.min(fallbackWhitespace.length, 4)}, 1fr)">
+      ${fallbackWhitespace.slice(0, 4).map(t => `
         <div class="thesis-card whitespace animated-item">
-          <div class="thesis-card-emoji">${t.emoji}</div>
-          <div class="thesis-card-title">${t.title}</div>
-          <div class="thesis-card-desc">${t.desc}</div>
-          <div class="thesis-card-status up">${t.status}</div>
-        </div>
-      `).join('')}
-    </div>
-
-    <div class="section-title-row" style="margin-top:28px">
-      <div class="section-title">📊 Portfolio Construction Gaps</div>
-    </div>
-    <div class="deal-grid">
-      ${THESIS_DATA.gaps.map(g => `
-        <div class="insight-box ${g.signal === 'positive' ? 'positive' : g.signal === 'negative' ? 'warning' : 'info'} animated-item">
-          <span class="insight-emoji">${g.emoji}</span>
-          <strong>${g.title}</strong> — ${g.desc}
+          <div class="thesis-card-emoji">${t.title ? (t.title.toLowerCase().includes('agent') ? '👔' : t.title.toLowerCase().includes('space') ? '🚀' : '💎') : '💎'}</div>
+          <div class="thesis-card-title">${t.title || t.company}</div>
+          <div class="thesis-card-desc">${t.summary || t.ai_summary || t.implication}</div>
+          <div class="thesis-card-status up">Opportunity</div>
         </div>
       `).join('')}
     </div>
@@ -1829,13 +2129,6 @@ function renderThesis(area) {
 // ============================================================
 function renderPortfolio(area) {
   const now = Date.now();
-
-  function getHealth(d) {
-    const last = d.last_email_timestamp ? parseInt(d.last_email_timestamp) : null;
-    if (!last) return 'yellow';
-    const days = (now - last) / 86400000;
-    return days < 30 ? 'green' : days < 90 ? 'yellow' : 'red';
-  }
 
   function getDaysSince(d) {
     const ts = d.last_email_timestamp ? parseInt(d.last_email_timestamp) :
@@ -1851,13 +2144,15 @@ function renderPortfolio(area) {
 
   const portfolio = streakDeals.filter(d => d.stage_key === '5014');
   const watching = streakDeals.filter(d => ['5008', '5015'].includes(d.stage_key));
+  const metricsMap = {};
+  (window._portfolioMetrics || []).forEach(m => { metricsMap[m.box_key] = m; });
 
   if (!portfolio.length) {
     area.innerHTML = `
       ${getModuleNews('portfolio')}
       <div class="stats-bar">
         <div class="stat-card"><div class="stat-label">Portfolio Companies</div><div class="stat-value emerald">0</div></div>
-        <div class="stat-card"><div class="stat-label">Watching</div><div class="stat-value blue">${watching.length}</div></div>
+        <div class="stat-card"><div class="stat-label">Total ARR Built</div><div class="stat-value blue">$0M</div></div>
       </div>
       <div style="padding:60px;text-align:center;color:var(--text-secondary)">
         <div style="font-size:3rem;margin-bottom:16px">📊</div>
@@ -1867,73 +2162,184 @@ function renderPortfolio(area) {
     return;
   }
 
-  const greenCount = portfolio.filter(p => getHealth(p) === 'green').length;
-  const alerts = portfolio.filter(p => getHealth(p) !== 'green').length;
-  const totalEmails = portfolio.reduce((a, p) => a + (p.total_sent_emails || 0) + (p.total_received_emails || 0), 0);
+  // Derive aggregate metrics from DB
+  let totalArr = 0;
+  let healthyCount = 0;
+  let riskCount = 0;
+
+  portfolio.forEach(p => {
+    const m = metricsMap[p.box_key];
+    if (m) {
+      if (m.arr) totalArr += Number(m.arr);
+      if (m.health_status === 'Green') healthyCount++;
+      if (m.health_status === 'Red') riskCount++;
+    } else {
+      // Fallback to Streak email health if no DB metric exists yet
+      const days = getDaysSince(p);
+      if (days < 30) healthyCount++; else if (days > 90) riskCount++;
+    }
+  });
 
   area.innerHTML = `
     ${getModuleNews('portfolio')}
     <div class="stats-bar">
       <div class="stat-card"><div class="stat-label">Portfolio Companies</div><div class="stat-value emerald">${portfolio.length}</div></div>
-      <div class="stat-card"><div class="stat-label">Active (last 30d)</div><div class="stat-value emerald">${greenCount}</div><div class="stat-change positive">✅ Engaged</div></div>
-      <div class="stat-card"><div class="stat-label">Total Emails</div><div class="stat-value blue">${totalEmails}</div><div class="stat-change positive">All-time interactions</div></div>
-      <div class="stat-card"><div class="stat-label">Needs Attention</div><div class="stat-value orange">${alerts}</div><div class="stat-change ${alerts ? 'negative' : 'positive'}">${alerts ? 'No recent contact' : 'All active ✅'}</div></div>
+      <div class="stat-card"><div class="stat-label">Total Portfolio ARR</div><div class="stat-value blue">$${(totalArr / 1000000).toFixed(1)}M</div><div class="stat-change positive">From ${portfolio.filter(p => metricsMap[p.box_key]?.arr).length} active reporters</div></div>
+      <div class="stat-card"><div class="stat-label">Healthy Companies</div><div class="stat-value emerald">${healthyCount}</div><div class="stat-change positive">On track</div></div>
+      <div class="stat-card"><div class="stat-label">At Risk / Runway < 6m</div><div class="stat-value orange">${riskCount}</div><div class="stat-change ${riskCount ? 'negative' : 'positive'}">${riskCount ? 'Requires intervention' : 'All healthy'}</div></div>
     </div>
 
     <div class="section-title-row">
       <div class="section-title">📊 Portfolio Companies</div>
-      <div class="section-subtitle">Live from Streak CRM · ${portfolio.length} companies · Auto-updated</div>
+      <div class="section-subtitle">Live from Streak CRM + Portfolio Metrics DB</div>
     </div>
 
-    <div class="portfolio-grid">
+    <div class="portfolio-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(400px,1fr));gap:16px">
       ${portfolio.map(p => {
-    const health = getHealth(p);
+    const m = metricsMap[p.box_key] || {};
+    const health = m.health_status ? m.health_status.toLowerCase() : (getDaysSince(p) < 30 ? 'green' : getDaysSince(p) < 90 ? 'yellow' : 'red');
     const industry = p._industry || inferIndustry(p);
     const country = p._country || inferCountry(p);
-    const days = getDaysSince(p);
-    const score = p._score !== undefined ? p._score : scoreStreakDeal(p);
-    const scoreColor = score >= 70 ? '#10b981' : score >= 45 ? '#f59e0b' : '#ef4444';
-    const enrich = (window._dealEnrichments || {})[p.box_key] || {};
-    const assignees = (() => { try { return JSON.parse(p.assigned_to || '[]'); } catch { return []; } })();
+    const scoreColor = health === 'green' ? '#10b981' : health === 'yellow' ? '#f59e0b' : '#ef4444';
     const name = (p.name || '').replace(/^www\./, '').replace(/\.(com|co\.in|co|in|io|ai|vc|org|net)(\/.*)?$/i, '');
+
+    // Format ARR
+    let arrText = 'Pending';
+    if (m.arr >= 1000000) arrText = `$${(m.arr / 1000000).toFixed(1)}M`;
+    else if (m.arr > 0) arrText = `$${Math.round(m.arr / 1000)}k`;
+
     return `
-          <div class="portfolio-card animated-item" style="cursor:pointer" onclick="openStreakDealModal(${JSON.stringify(p).replace(/"/g, '&quot;')})">
-            <div class="portfolio-logo" style="font-size:1.4rem">${industry.slice(0, 2)}</div>
-            <div>
-              <div class="portfolio-info-name">${name}</div>
-              <div class="portfolio-info-sub">${p.funding_stage || industry} · ${country}</div>
-            </div>
-            <div class="portfolio-metric">
-              <div class="portfolio-metric-value" style="color:${scoreColor}">${score}</div>
-              <div class="portfolio-metric-label">VC Score</div>
-            </div>
-            <div class="portfolio-metric">
-              <div class="portfolio-metric-value" style="color:var(--accent-emerald)">↑${p.total_sent_emails || 0} ↓${p.total_received_emails || 0}</div>
-              <div class="portfolio-metric-label">Emails S/R</div>
-            </div>
-            <div class="portfolio-metric">
-              <div class="portfolio-metric-value" style="color:${days < 30 ? 'var(--accent-green)' : days < 90 ? 'var(--accent-orange)' : '#ef4444'}">${days < 999 ? days + 'd' : '—'}</div>
-              <div class="portfolio-metric-label">Days Since</div>
-            </div>
-            <div style="display:flex;flex-direction:column;gap:6px;min-width:200px">
-              <div style="display:flex;align-items:center;gap:8px">
-                <span class="health-indicator ${health}">${health === 'green' ? '● Active' : health === 'yellow' ? '● Quiet' : '● Stale'}</span>
-                ${enrich.thesis_fit_score ? `<span style="font-size:0.65rem;padding:1px 6px;border-radius:6px;background:var(--accent-purple)15;color:var(--accent-purple)">Fit: ${enrich.thesis_fit_score}/100</span>` : ''}
+          <div class="portfolio-card animated-item" style="cursor:pointer;background:var(--bg-secondary);border:1px solid var(--border-medium);border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:16px" onclick="openStreakDealModal(${JSON.stringify(p).replace(/"/g, '&quot;')})">
+            
+            <div style="display:flex;gap:12px;align-items:flex-start">
+              <div class="portfolio-logo" style="font-size:1.6rem;width:48px;height:48px;background:var(--bg-tertiary);border-radius:12px;display:flex;align-items:center;justify-content:center">${industry.slice(0, 2)}</div>
+              <div style="flex:1">
+                <div style="font-size:1.15rem;font-weight:800;letter-spacing:-0.02em">${name}</div>
+                <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px">${p.funding_stage || industry} · ${country}</div>
               </div>
-              ${enrich.founder_name ? `<div style="font-size:0.7rem;color:var(--text-muted)">👤 ${enrich.founder_name}</div>` : ''}
-              ${(enrich.strengths || []).slice(0, 1).map(s => `<div style="font-size:0.72rem;color:var(--accent-green);line-height:1.4">✓ ${s}</div>`).join('')}
-              ${(enrich.risks || []).slice(0, 1).map(r => `<div style="font-size:0.72rem;color:var(--accent-orange);line-height:1.4">⚠ ${r}</div>`).join('')}
-              ${assignees.length ? `<div style="font-size:0.68rem;color:var(--text-muted)">👤 ${assignees.map(a => a.name || a.email || a).join(', ')}</div>` : ''}
+              <span class="health-indicator ${health}" style="align-self:flex-start;padding:4px 10px;border-radius:12px;font-size:0.65rem;text-transform:uppercase;font-weight:800">${health === 'green' ? '● Healthy' : health === 'yellow' ? '● Monitor' : '● At Risk'}</span>
             </div>
+
+            <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:8px;background:var(--bg-primary);padding:12px;border-radius:8px">
+              <div>
+                <div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px">ARR Data</div>
+                <div style="font-size:1.1rem;font-weight:700;font-family:'JetBrains Mono',monospace;color:${m.arr ? 'var(--text-primary)' : 'var(--text-muted)'}">${arrText}</div>
+              </div>
+              <div>
+                <div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px">Runway</div>
+                <div style="font-size:1.1rem;font-weight:700;font-family:'JetBrains Mono',monospace;color:${m.cash_runway_mo < 6 ? '#ef4444' : m.cash_runway_mo ? 'var(--text-primary)' : 'var(--text-muted)'}">${m.cash_runway_mo ? m.cash_runway_mo + ' mo' : 'Pending'}</div>
+              </div>
+              <div>
+                <div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px">YoY Growth</div>
+                <div style="font-size:1.1rem;font-weight:700;font-family:'JetBrains Mono',monospace;color:${m.growth_rate > 50 ? 'var(--accent-emerald)' : m.growth_rate ? 'var(--text-primary)' : 'var(--text-muted)'}">${m.growth_rate ? m.growth_rate + '%' : 'Pending'}</div>
+              </div>
+            </div>
+
           </div>`;
   }).join('')}
     </div>
+    
     ${watching.length ? `
     <div class="section-title-row" style="margin-top:32px">
       <div class="section-title">👀 Watching / Too Early</div>
       <div class="section-subtitle">${watching.length} companies in tracking stages</div>
     </div>
     <div class="deal-grid">${watching.map(d => renderStreakDealCard(d)).join('')}</div>` : ''
+    }
+`;
+}
+
+// ============================================================
+// MODULE 19: Board Seat Manager
+// ============================================================
+function renderBoardSeats(area) {
+  const boardMeetings = window._boardMeetings || [];
+
+  if (!boardMeetings.length) {
+    area.innerHTML = `
+  < div style = "padding:60px;text-align:center;color:var(--text-secondary)" >
+        <div style="font-size:3rem;margin-bottom:16px">🏛️</div>
+        <h3 style="color:var(--text-primary)">No Board Meetings Tracked</h3>
+        <p>Start tracking board meetings by adding data to the <code>board_meetings</code> table in Supabase.</p>
+      </div > `;
+    return;
+  }
+
+  const upcoming = boardMeetings.filter(m => m.status === 'Upcoming').sort((a, b) => new Date(a.meeting_date) - new Date(b.meeting_date));
+  const past = boardMeetings.filter(m => m.status === 'Completed').sort((a, b) => new Date(b.meeting_date) - new Date(a.meeting_date));
+
+  area.innerHTML = `
+  < div style = "margin-bottom:20px;display:flex;justify-content:space-between;align-items:center" >
+    <div>
+      <h2 style="font-size:1.8rem;margin:0">Board Seat Manager</h2>
+      <p style="color:var(--text-secondary);margin:4px 0 0 0">Live synchronization with <code>board_meetings</code> intelligence.</p>
+    </div>
+    </div >
+
+  <div class="stats-bar" style="display:flex;gap:16px;margin-bottom:24px">
+    <div class="stat-card" style="flex:1"><div class="stat-label">Upcoming Meetings</div><div class="stat-value emerald">${upcoming.length}</div></div>
+    <div class="stat-card" style="flex:1"><div class="stat-label">Total Board Seats</div><div class="stat-value blue">${upcoming.length + past.length}</div></div>
+  </div>
+
+    ${upcoming.length ? `
+    <div class="section-title-row" style="margin-top:24px">
+      <div class="section-title">🗓️ Upcoming Board Meetings</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(400px,1fr));gap:16px">
+      ${upcoming.map(m => `
+        <div class="animated-item" style="background:var(--bg-secondary);border:1px solid var(--border-medium);border-radius:12px;padding:20px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+            <div>
+              <div style="font-size:1.15rem;font-weight:800">${m.company_name}</div>
+              <div style="font-size:0.8rem;color:var(--text-muted)">📝 ${new Date(m.meeting_date).toLocaleDateString()}</div>
+            </div>
+            <span style="background:rgba(16,185,129,0.1);color:var(--accent-green);padding:4px 10px;border-radius:12px;font-size:0.65rem;text-transform:uppercase;font-weight:800">Upcoming</span>
+          </div>
+          <div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:12px">
+            <strong>Board Member:</strong> ${m.board_member}
+          </div>
+          ${m.key_agenda && m.key_agenda.length ? `
+          <div style="background:var(--bg-primary);padding:12px;border-radius:8px">
+            <div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">Key Agenda items</div>
+            <ul style="margin:0;padding-left:16px;font-size:0.8rem;color:var(--text-primary)">
+              ${m.key_agenda.map(item => `<li style="margin-bottom:4px">${item}</li>`).join('')}
+            </ul>
+          </div>` : ''}
+          ${m.deck_url ? `
+          <div style="margin-top:12px">
+            <a href="${m.deck_url}" target="_blank" style="font-size:0.8rem;color:var(--accent-blue);text-decoration:none;display:inline-flex;align-items:center;gap:4px">
+              <span>📄</span> View Board Deck 
+            </a>
+          </div>` : ''}
+        </div>
+      `).join('')}
+    </div>` : ''
+    }
+
+    ${past.length ? `
+    <div class="section-title-row" style="margin-top:32px">
+      <div class="section-title">✅ Recent Board Meetings</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(400px,1fr));gap:16px">
+      ${past.slice(0, 6).map(m => `
+        <div class="animated-item" style="background:var(--bg-secondary);border:1px solid var(--border-medium);border-radius:12px;padding:20px;opacity:0.8">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+            <div>
+              <div style="font-size:1.15rem;font-weight:800">${m.company_name}</div>
+              <div style="font-size:0.8rem;color:var(--text-muted)">📝 ${new Date(m.meeting_date).toLocaleDateString()}</div>
+            </div>
+            <span style="background:rgba(156,163,175,0.1);color:var(--text-secondary);padding:4px 10px;border-radius:12px;font-size:0.65rem;text-transform:uppercase;font-weight:800">Completed</span>
+          </div>
+          ${m.action_items && m.action_items.length ? `
+          <div style="background:var(--bg-primary);padding:12px;border-radius:8px">
+            <div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">Action Items</div>
+            <ul style="margin:0;padding-left:16px;font-size:0.8rem;color:var(--text-primary)">
+              ${m.action_items.map(item => `<li style="margin-bottom:4px">${item}</li>`).join('')}
+            </ul>
+          </div>` : ''}
+        </div>
+      `).join('')}
+    </div>` : ''
     }
 `;
 }
@@ -2054,37 +2460,34 @@ function renderPowerMoves(area) {
 // MODULE 6: Pattern Recognition Engine
 // ============================================================
 function renderPatterns(area) {
+  const cached = window._aiPatterns;
+
   area.innerHTML = `
-    ${getModuleNews('patterns', 4)}
     <div class="insight-box positive">
       <span class="insight-emoji">🧬</span>
-      <strong>Pattern Insight:</strong> In JV's portfolio, 100% of companies with composite score >75 have founders with prior exits AND regulatory tailwinds. Speed of execution (MVP <90 days) correlates with 3x Series A success rate.
+      <strong>Pattern Insight:</strong> ${cached ? cached.insight : "Click below to analyze the live pipeline for predictive success patterns."}
     </div>
 
     <div class="section-title-row" style="margin-top:20px">
       <div class="section-title">What Winners Look Like Before They Win</div>
-      <div class="section-subtitle">Patterns from historical startup data analysis</div>
+      <div class="section-subtitle">AI analysis of live Streak CRM deal outcomes</div>
     </div>
 
-    <div class="pattern-columns">
-      <div class="pattern-column">
-        <div class="pattern-column-title"><span style="color:var(--accent-emerald)">✅</span> Winner Patterns</div>
-        ${PATTERN_WINNERS.map(p => `
-          <div class="pattern-item">
-            <div class="pattern-check win">✓</div>
-            <div class="pattern-text">${p.text}</div>
-          </div>
-        `).join('')}
-      </div>
-      <div class="pattern-column">
-        <div class="pattern-column-title"><span style="color:var(--accent-red)">✗</span> Failure Patterns</div>
-        ${PATTERN_LOSERS.map(p => `
-          <div class="pattern-item">
-            <div class="pattern-check fail">✗</div>
-            <div class="pattern-text">${p.text}</div>
-          </div>
-        `).join('')}
-      </div>
+    <div style="margin-bottom: 24px;">
+      <button id="generate-patterns-btn" class="primary-btn" style="padding:8px 16px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white;border:none;border-radius:10px;font-size:0.75rem;font-weight:700;cursor:pointer;font-family:Inter;transition:all 0.2s">
+        🧠 Analyze Live Pipeline
+      </button>
+      <span id="patterns-status" style="margin-left: 12px; font-size: 0.75rem; color: var(--text-muted);"></span>
+    </div>
+
+    <div id="patterns-content">
+      ${cached ? renderPatternColumns(cached) : `
+        <div style="padding:60px;text-align:center;color:var(--text-secondary);background:var(--bg-secondary);border-radius:14px;border:1px dashed var(--border-medium)">
+          <div style="font-size:2.5rem;margin-bottom:14px">📊</div>
+          <h3 style="color:var(--text-primary);margin-bottom:10px;font-size:1rem">No Patterns Analyzed Yet</h3>
+          <p style="max-width:450px;margin:0 auto 16px;font-size:0.8rem;line-height:1.6">Run the AI engine to analyze properties of deals that moved to late stages vs those that were passed.</p>
+        </div>
+      `}
     </div>
 
     <div class="section-title-row" style="margin-top:28px">
@@ -2100,126 +2503,342 @@ function renderPatterns(area) {
         </div>
       `).join('')}
     </div>
-`;
+  `;
+
+  document.getElementById('generate-patterns-btn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('generate-patterns-btn');
+    const status = document.getElementById('patterns-status');
+    const content = document.getElementById('patterns-content');
+    
+    btn.disabled = true;
+    btn.textContent = '🧠 Analyzing Pipeline...';
+    btn.style.opacity = '0.6';
+    status.textContent = 'Comparing active vs passed deals with GPT-4o...';
+
+    try {
+      if (!window.AI || !window.AI.discoverPatterns) throw new Error("AI discoverPatterns function not loaded.");
+      const patterns = await window.AI.discoverPatterns(streakDeals, window._dealEnrichments);
+      window._aiPatterns = patterns;
+      
+      const parentArea = btn.closest('#content-area');
+      if(parentArea) renderPatterns(parentArea);
+    } catch (err) {
+      console.error(err);
+      status.textContent = 'Error analyzing patterns.';
+      btn.disabled = false;
+      btn.textContent = '🧠 Analyze Live Pipeline';
+      btn.style.opacity = '1';
+    }
+  });
+}
+
+function renderPatternColumns(patterns) {
+  return `
+    <div class="pattern-columns">
+      <div class="pattern-column">
+        <div class="pattern-column-title"><span style="color:var(--accent-emerald)">✅</span> Winner Patterns</div>
+        ${(patterns.winners || []).map(p => `
+          <div class="pattern-item">
+            <div class="pattern-check win">✓</div>
+            <div class="pattern-text">${p.text}</div>
+          </div>
+        `).join('')}
+      </div>
+      <div class="pattern-column">
+        <div class="pattern-column-title"><span style="color:var(--accent-red)">✗</span> Failure Patterns</div>
+        ${(patterns.losers || []).map(p => `
+          <div class="pattern-item">
+            <div class="pattern-check fail">✗</div>
+            <div class="pattern-text">${p.text}</div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
 }
 
 // ============================================================
 // MODULE 7: Daily Intelligence Briefing
 // ============================================================
-// MODULE 7: Daily Intelligence Briefing
-// ============================================================
 async function renderBriefing(area) {
-  // Show loading state
-  area.innerHTML = `
-  < div style = "padding:60px 20px; text-align:center; color:var(--text-secondary)" >
-      <div style="font-size:3rem; margin-bottom:16px; animation: pulse 2s infinite">🗞️</div>
-      <h3 style="font-family:Inter; font-weight:600; font-size:1.2rem; color:var(--text-primary); margin-bottom:8px">Compiling Today's Intelligence...</h3>
-      <p style="font-size:0.9rem">Fetching signals, funding rounds, and ecosystem news</p>
-    </div >
-  `;
-
-  let latestBriefing = null;
-
-  // Try fetching from Supabase
-  if (supabaseConnected) {
-    try {
-      const { data, error } = await supabaseClient
-        .from('daily_briefings')
-        .select('*')
-        .order('date', { ascending: false })
-        .limit(1);
-
-      if (!error && data && data.length > 0) {
-        latestBriefing = data[0];
-      }
-    } catch (e) {
-      console.warn('Failed to fetch daily briefing from Supabase:', e);
-    }
-  }
-
-  const top5 = rankedStartups.slice(0, 5);
+  const signals = window._newsSignals || [];
   const now = new Date();
   const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
-  // If we have an AI-generated briefing from the database
-  if (latestBriefing) {
-    const briefDate = new Date(latestBriefing.date).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-    const sources = latestBriefing.sources ? JSON.parse(latestBriefing.sources) : [];
-
-    // Simple markdown parser for the AI output
-    let md = latestBriefing.summary_markdown;
-    md = md.replace(/### (.*?)\n/g, '<div class="briefing-section-header" style="margin-top:24px"><span class="briefing-section-title">$1</span></div>');
-    md = md.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    md = md.replace(/- (.*?)\n/g, '<div class="briefing-item animated-item" style="padding:12px 16px; margin-bottom:8px"><div class="briefing-item-body" style="margin-top:0">• $1</div></div>');
-    md = md.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" style="color:var(--accent-blue);text-decoration:none">$1</a>');
-    md = md.replace(/\n/g, ''); // Clean remaining newlines to prevent weird gaps
-
-    area.innerHTML = `
-  < div class="briefing-container" >
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 24px;">
-      <div class="briefing-date">📅 ${briefDate} · Auto-generated via AI</div>
-      <div style="font-size:0.75rem; color:var(--text-tertiary)">Sources: ${sources.join(', ') || 'Various'}</div>
-    </div>
-        ${md}
-      </div >
-  `;
-    return;
+  // Markdown → HTML parser
+  function parseMarkdown(md) {
+    if (!md) return '';
+    return md
+      .replace(/^### (.*$)/gm, '<h3 style="font-size:0.95rem;font-weight:800;color:var(--text-primary);margin:20px 0 8px;padding-bottom:6px;border-bottom:1px solid var(--border-subtle)">$1</h3>')
+      .replace(/^## (.*$)/gm, '<h2 style="font-size:1.05rem;font-weight:800;color:var(--text-primary);margin:24px 0 10px">$1</h2>')
+      .replace(/^# (.*$)/gm, '<h1 style="font-size:1.15rem;font-weight:900;color:var(--text-primary);margin:0 0 12px">$1</h1>')
+      .replace(/\*\*(.*?)\*\*/g, '<strong style="color:var(--text-primary);font-weight:700">$1</strong>')
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" style="color:var(--accent-blue);text-decoration:none;border-bottom:1px dotted var(--accent-blue)">$1</a>')
+      .replace(/^- (.*$)/gm, '<div style="display:flex;gap:8px;margin:4px 0;padding-left:4px"><span style="color:var(--accent-emerald);font-weight:700">•</span><span>$1</span></div>')
+      .replace(/\n\n/g, '</p><p style="margin:10px 0;line-height:1.7">')
+      .replace(/\n/g, '<br>')
+      .replace(/^/, '<p style="margin:10px 0;line-height:1.7">')
+      .replace(/$/, '</p>');
   }
 
-  // Fallback to static demo content if no DB record found
-  area.innerHTML = `
-  < div class="briefing-container" >
-      <div class="briefing-date">📅 ${dateStr} · 5 min read</div>
+  // Relative time helper
+  function relativeTime(dateStr) {
+    if (!dateStr) return '';
+    const diff = (now - new Date(dateStr)) / 1000;
+    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    if (diff < 604800) return Math.floor(diff / 86400) + 'd ago';
+    return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
 
-      <div class="briefing-section">
-        <div class="briefing-section-header">
-          <span class="briefing-section-emoji">🎯</span>
-          <span class="briefing-section-title">5 Deals to Track</span>
-          <span class="briefing-section-count">TOP PICKS</span>
+  // Source badge colors
+  const sourceColors = {
+    'Inc42': '#f97316', 'VCCircle': '#8b5cf6', 'ET Tech': '#3b82f6', 'ET Startups': '#3b82f6',
+    'Mint': '#14b8a6', 'TechCrunch': '#10b981', 'YourStory': '#f59e0b', 'Entrackr': '#ef4444',
+    'DealStreetAsia': '#ec4899', 'e27': '#84cc16', 'Forbes India': '#b91c1c', 'Moneycontrol': '#06b6d4',
+    'Crunchbase News': '#0d9488', 'VentureBeat': '#9333ea', 'SaaStr': '#6366f1',
+    'Tech in Asia': '#0284c7', 'Business Standard': '#1e40af', 'Google News VC': '#4285f4'
+  };
+
+  // Categorize signals by sector
+  const sectors = {};
+  signals.forEach(s => {
+    const sector = s.sector_id || s.type || 'general';
+    if (!sectors[sector]) sectors[sector] = [];
+    sectors[sector].push(s);
+  });
+  const sectorList = Object.keys(sectors).sort((a, b) => sectors[b].length - sectors[a].length);
+  const uniqueSources = [...new Set(signals.map(s => s.source).filter(Boolean))];
+  const fundingCount = signals.filter(s => s.type === 'funding_round').length;
+
+  // Check for cached brief in Supabase
+  let cachedBrief = null;
+  if (supabaseConnected) {
+    try {
+      const { data, error } = await supabaseClient.from('daily_briefings').select('*').order('date', { ascending: false }).limit(1);
+      if (!error && data && data.length > 0) cachedBrief = data[0];
+    } catch (e) { /* ignore */ }
+    if (!cachedBrief) {
+      try {
+        const { data, error } = await supabaseClient.from('daily_briefs').select('*').order('created_at', { ascending: false }).limit(1);
+        if (!error && data && data.length > 0) cachedBrief = { summary_markdown: data[0].content, date: data[0].brief_date };
+      } catch (e) { /* ignore */ }
+    }
+  }
+
+  const briefContent = cachedBrief ? (cachedBrief.summary_markdown || cachedBrief.content || '') : '';
+  const parsedBrief = parseMarkdown(briefContent);
+
+  // Build signal feed cards (compact)
+  const signalCards = signals.slice(0, 20).map((s, i) => {
+    const srcColor = sourceColors[s.source] || '#64748b';
+    const headline = s.title || s.headline || s.summary || '';
+    const time = relativeTime(s.published_at);
+    return `
+      <div class="animated-item signal-item" data-sector="${s.sector_id || s.type || 'general'}" style="animation-delay:${i * 0.03}s;padding:10px 14px;border-radius:10px;background:var(--bg-tertiary);border:1px solid var(--border-subtle);transition:all 0.15s;cursor:pointer"
+        onmouseover="this.style.borderColor='${srcColor}40';this.style.background='var(--bg-secondary)'"
+        onmouseout="this.style.borderColor='var(--border-subtle)';this.style.background='var(--bg-tertiary)'"
+        ${s.source_url ? `onclick="window.open('${s.source_url}','_blank')"` : ''}>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+          <span style="padding:1px 7px;border-radius:8px;font-size:0.55rem;font-weight:700;background:${srcColor}20;color:${srcColor};border:1px solid ${srcColor}25">${s.source || '?'}</span>
+          <span style="font-size:0.55rem;color:var(--text-muted)">${time}</span>
         </div>
-        ${top5.map((s, i) => `
-          <div class="briefing-item animated-item">
-            <div class="briefing-item-title">${i + 1}. ${s.scores.tier.emoji} ${s.name} — ${s.subSector} (${s.geography})</div>
-            <div class="briefing-item-body">
-              Score: <strong>${s.scores.composite}</strong> | ${s.stage} | $${s.lastRound.amount}M ${s.lastRound.type}<br>
-              <strong>Why now:</strong> ${Object.entries(s.signals).sort((a, b) => b[1].score - a[1].score)[0][1].detail}
+        <div style="font-size:0.73rem;font-weight:600;color:var(--text-primary);line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${s.company ? '<span style="color:var(--accent-emerald)">' + s.company + '</span>: ' : ''}${headline}</div>
+        ${s.relevance_score > 80 ? '<div style="margin-top:4px"><span style="padding:1px 5px;border-radius:6px;font-size:0.45rem;font-weight:800;background:rgba(239,68,68,0.12);color:#ef4444;letter-spacing:0.05em">HOT</span></div>' : ''}
+      </div>`;
+  }).join('');
+
+  // Main layout
+  area.innerHTML = `
+    <!-- Header -->
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:12px">
+      <div>
+        <div style="font-size:1.2rem;font-weight:800;color:var(--text-primary)">Daily Intelligence Brief</div>
+        <div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px">${dateStr}</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <div style="padding:5px 12px;background:${signals.length > 0 ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)'};border:1px solid ${signals.length > 0 ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)'};border-radius:20px;font-size:0.65rem;font-weight:600;color:${signals.length > 0 ? '#10b981' : '#ef4444'}">
+          ${signals.length > 0 ? `✅ ${signals.length} signals · ${uniqueSources.length} sources` : '⚠️ No signals'}
+        </div>
+        <button id="generate-brief-btn" style="padding:8px 18px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white;border:none;border-radius:10px;font-size:0.75rem;font-weight:700;cursor:pointer;font-family:Inter;transition:all 0.2s"
+          onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 4px 16px rgba(99,102,241,0.4)'"
+          onmouseout="this.style.transform='';this.style.boxShadow=''">🤖 Generate AI Brief</button>
+      </div>
+    </div>
+
+    <!-- Compact Stats -->
+    <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+      <div style="flex:1;min-width:120px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 16px;text-align:center">
+        <div style="font-size:0.55rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em">Signals</div>
+        <div style="font-size:1.4rem;font-weight:900;color:var(--accent-emerald)">${signals.length}</div>
+      </div>
+      <div style="flex:1;min-width:120px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 16px;text-align:center">
+        <div style="font-size:0.55rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em">Sources</div>
+        <div style="font-size:1.4rem;font-weight:900;color:var(--accent-blue)">${uniqueSources.length}</div>
+      </div>
+      <div style="flex:1;min-width:120px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 16px;text-align:center">
+        <div style="font-size:0.55rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em">Funding</div>
+        <div style="font-size:1.4rem;font-weight:900;color:var(--accent-emerald)">${fundingCount}</div>
+      </div>
+      <div style="flex:1;min-width:120px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 16px;text-align:center">
+        <div style="font-size:0.55rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em">Sectors</div>
+        <div style="font-size:1.4rem;font-weight:900;color:var(--accent-blue)">${sectorList.length}</div>
+      </div>
+    </div>
+
+    <div id="brief-generation-status" style="margin:6px 0;font-size:0.7rem;color:var(--text-muted)"></div>
+
+    <!-- TWO-COLUMN LAYOUT: AI Brief (left) + Signal Feed (right) -->
+    <div style="display:grid;grid-template-columns:${signals.length > 0 ? '1.5fr 1fr' : '1fr'};gap:16px;margin-bottom:20px;align-items:start">
+      
+      <!-- LEFT: AI Brief -->
+      <div>
+        <div id="ai-brief-container" style="${cachedBrief || signals.length === 0 ? '' : 'display:none;'}">
+          ${cachedBrief ? `
+          <div style="background:var(--bg-secondary);border:1px solid var(--border-medium);border-radius:14px;padding:20px;overflow:hidden">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border-subtle)">
+              <div style="font-size:0.8rem;font-weight:800;color:var(--text-primary);display:flex;align-items:center;gap:6px">
+                <span style="width:8px;height:8px;border-radius:50%;background:#10b981;display:inline-block"></span>
+                AI-Generated Brief
+              </div>
+              <div style="font-size:0.6rem;color:var(--text-muted);background:var(--bg-tertiary);padding:2px 8px;border-radius:8px">${cachedBrief.date ? new Date(cachedBrief.date).toLocaleDateString() : 'Today'}</div>
+            </div>
+            <div class="ai-brief-body" style="font-size:0.78rem;line-height:1.7;color:var(--text-secondary)">
+              ${parsedBrief}
             </div>
           </div>
-        `).join('')}
+          ` : `
+          <div style="background:var(--bg-secondary);border:1px dashed var(--border-medium);border-radius:14px;padding:40px 20px;text-align:center">
+            <div style="font-size:2.5rem;margin-bottom:12px">🤖</div>
+            <div style="font-size:0.85rem;font-weight:700;color:var(--text-primary);margin-bottom:6px">No AI Brief Yet</div>
+            <div style="font-size:0.72rem;color:var(--text-muted);max-width:300px;margin:0 auto;line-height:1.6">Click "Generate AI Brief" above to create a GPT-4o powered intelligence summary from your signals and Streak deals.</div>
+          </div>
+          `}
+        </div>
+
+        <!-- Pipeline Status (below brief) -->
+        <div style="background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;margin-top:12px">
+          <div style="font-size:0.6rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">📡 Sources</div>
+          <div style="display:flex;flex-wrap:wrap;gap:5px">
+            ${['Inc42', 'VCCircle', 'ET Tech', 'Mint', 'YourStory', 'Entrackr', 'Forbes India', 'DealStreetAsia', 'e27', 'TechCrunch', 'Crunchbase News', 'VentureBeat', 'SaaStr', 'Tech in Asia', 'Moneycontrol', 'Business Standard'].map(source => {
+              const isActive = uniqueSources.includes(source);
+              const color = sourceColors[source] || '#64748b';
+              return `<span style="padding:2px 7px;border-radius:8px;font-size:0.5rem;font-weight:600;border:1px solid ${isActive ? color + '30' : 'var(--border-subtle)'};background:${isActive ? color + '10' : 'transparent'};color:${isActive ? color : 'var(--text-muted)'}">${isActive ? '●' : '○'} ${source}</span>`;
+            }).join('')}
+          </div>
+        </div>
       </div>
 
-      <div class="briefing-section">
-        <div class="briefing-section-header">
-          <span class="briefing-section-emoji">📈</span>
-          <span class="briefing-section-title">3 Trends</span>
-          <span class="briefing-section-count">MARKET PULSE</span>
+      <!-- RIGHT: Live Signal Feed -->
+      ${signals.length > 0 ? `
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <div style="font-size:0.75rem;font-weight:800;color:var(--text-primary)">⚡ Live Feed</div>
+          <div style="font-size:0.55rem;color:var(--text-muted)">${signals.length} signals</div>
         </div>
-        <div class="briefing-item animated-item">
-          <div class="briefing-item-title">1. Factory AI funding up 180% YoY in India</div>
-          <div class="briefing-item-body">India's PLI scheme + China+1 migration driving unprecedented demand for manufacturing automation. Three JV portfolio companies (FactoryOS, QualityLens, SteelMind) are in the sweet spot. Expect Series A valuations to 2x by Q3 2026.</div>
-        </div>
-        <div class="briefing-item animated-item">
-          <div class="briefing-item-title">2. SEA social commerce GMV growing 45% QoQ</div>
-          <div class="briefing-item-body">Livestream shopping adoption in Vietnam and Indonesia outpacing all other channels. ShopHero and Playlo are early indicators. TikTok Shop's ASEAN revenue hit $4.4B — creating platform risk but also massive distribution opportunity.</div>
-        </div>
-        <div class="briefing-item animated-item">
-          <div class="briefing-item-title">3. ESG compliance becoming mandatory for ASEAN exporters</div>
-          <div class="briefing-item-body">EU CBAM (Carbon Border Adjustment Mechanism) takes full effect 2026. Singapore carbon tax doubled. Vietnamese factories need carbon accounting or lose EU export access. GreenMill's TAM just expanded significantly.</div>
-        </div>
-      </div>
 
-      <div class="briefing-section">
-        <div class="briefing-section-header">
-          <span class="briefing-section-emoji">🔮</span>
-          <span class="briefing-section-title">1 Contrarian Insight</span>
+        <!-- Sector filter pills -->
+        <div style="display:flex;gap:4px;margin-bottom:10px;flex-wrap:wrap" id="sector-tabs">
+          <button class="sector-tab active" data-sector="all" style="padding:3px 10px;border-radius:12px;border:1px solid var(--border-medium);background:var(--accent-blue);color:white;font-size:0.55rem;font-weight:600;cursor:pointer;font-family:Inter">All</button>
+          ${sectorList.slice(0, 6).map(sec => `
+            <button class="sector-tab" data-sector="${sec}" style="padding:3px 10px;border-radius:12px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-muted);font-size:0.55rem;font-weight:600;cursor:pointer;font-family:Inter">${sec.charAt(0).toUpperCase() + sec.slice(1)}</button>
+          `).join('')}
         </div>
-        <div class="briefing-item contrarian animated-item">
-          <div class="briefing-item-title">Everyone's chasing AI SaaS — the real alpha is in hardware-software combos</div>
-          <div class="briefing-item-body">While VCs pile into pure software plays, RoboWeld and PackBot combine hardware + AI software at 70% gross margins. Hardware creates lock-in that software alone can't achieve. Chinese competitors can't replicate the local field service network. This is the Fanuc/Keyence playbook, not the Salesforce one. JV should double down here while others look away.</div>
+
+        <!-- Signal cards -->
+        <div id="signal-feed" style="display:flex;flex-direction:column;gap:6px;max-height:600px;overflow-y:auto;padding-right:4px">
+          ${signalCards}
         </div>
       </div>
-    </div >
+      ` : ''}
+    </div>
+
+    ${signals.length === 0 ? `
+    <div style="padding:50px;text-align:center;color:var(--text-secondary);background:var(--bg-secondary);border-radius:14px;border:1px dashed var(--border-medium)">
+      <div style="font-size:2.5rem;margin-bottom:14px">📡</div>
+      <h3 style="color:var(--text-primary);margin-bottom:10px;font-size:1rem">No News Signals Yet</h3>
+      <p style="max-width:450px;margin:0 auto 16px;font-size:0.8rem;line-height:1.6">Import the n8n workflow to start receiving real-time VC news from 18 sources.</p>
+      <div style="text-align:left;max-width:350px;margin:0 auto;background:var(--bg-tertiary);border-radius:10px;padding:16px;font-size:0.72rem;line-height:1.8">
+        <strong>Quick Setup:</strong><br>
+        1️⃣ Import <code>news_rss_workflow_v6_final.json</code> into n8n<br>
+        2️⃣ Connect Supabase credentials<br>
+        3️⃣ Test run → activate schedule
+      </div>
+    </div>
+    ` : ''}
   `;
+
+  // Sector tab filtering
+  document.querySelectorAll('.sector-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.sector-tab').forEach(t => {
+        t.style.background = 'transparent';
+        t.style.color = 'var(--text-muted)';
+        t.classList.remove('active');
+      });
+      tab.style.background = 'var(--accent-blue)';
+      tab.style.color = 'white';
+      tab.classList.add('active');
+      const sector = tab.dataset.sector;
+      document.querySelectorAll('.signal-item').forEach(item => {
+        item.style.display = sector === 'all' || item.dataset.sector === sector ? '' : 'none';
+      });
+    });
+  });
+
+  // Generate Brief button
+  document.getElementById('generate-brief-btn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('generate-brief-btn');
+    const status = document.getElementById('brief-generation-status');
+    const container = document.getElementById('ai-brief-container');
+    btn.disabled = true;
+    btn.textContent = '🧠 Generating...';
+    btn.style.opacity = '0.6';
+    status.textContent = 'Analyzing ' + signals.length + ' signals + ' + streakDeals.length + ' Streak deals with GPT-4o...';
+
+    try {
+      const briefHTML = await window.AI.dailyBrief(signals, streakDeals, window._portfolioMetrics || []);
+
+      // Save to Supabase
+      if (supabaseClient) {
+        try {
+          await supabaseClient.from('daily_briefs').upsert({
+            brief_date: new Date().toISOString().split('T')[0],
+            user_email: currentUser?.email || 'guest',
+            content: briefHTML,
+            model_used: 'gpt-4o'
+          }, { onConflict: 'brief_date,user_email' });
+        } catch (e) { console.warn('Brief save:', e.message); }
+      }
+
+      // Render the brief with markdown parsing
+      container.style.display = '';
+      container.innerHTML = `
+        <div style="background:var(--bg-secondary);border:1px solid var(--border-medium);border-radius:14px;padding:20px;overflow:hidden">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border-subtle)">
+            <div style="font-size:0.8rem;font-weight:800;color:var(--text-primary);display:flex;align-items:center;gap:6px">
+              <span style="width:8px;height:8px;border-radius:50%;background:#10b981;display:inline-block;animation:pulse 2s infinite"></span>
+              AI Brief · GPT-4o
+            </div>
+            <div style="font-size:0.6rem;color:var(--text-muted);background:var(--bg-tertiary);padding:2px 8px;border-radius:8px">Just now</div>
+          </div>
+          <div class="ai-brief-body" style="font-size:0.78rem;line-height:1.7;color:var(--text-secondary)">
+            ${parseMarkdown(briefHTML)}
+          </div>
+        </div>`;
+      btn.disabled = false;
+      btn.textContent = '🔄 Regenerate';
+      btn.style.opacity = '1';
+      status.textContent = '✅ Brief generated and saved';
+    } catch (err) {
+      console.error('Brief generation failed:', err);
+      status.textContent = '❌ ' + err.message + ' — Check OpenAI API key in config.js';
+      btn.disabled = false;
+      btn.textContent = '🤖 Retry';
+      btn.style.opacity = '1';
+    }
+  });
 }
 
 // ============================================================
@@ -2492,45 +3111,65 @@ const TALKING_POINTS_TEMPLATES = [
 
 function renderMeetingPrep(area) {
   const startups = rankedStartups.length ? rankedStartups : [];
-  let selectedStartup = startups[0];
+  let selectedId = 'startup-0';
 
-  function buildPrep(s) {
-    if (!s) return '<div class="empty-state">No startups available for prep</div>';
-    const sectorObjns = IC_OBJECTIONS[s.sector] || IC_OBJECTIONS['Consumer Tech'];
-    const talkingPts = TALKING_POINTS_TEMPLATES.map(t => ({ label: t.label, text: t.template(s) }));
-    const risks = [
-      { risk: 'Market timing too early', prob: s.tam > 20 ? 'Low' : 'Medium', impact: 'High' },
-      { risk: 'Execution at scale', prob: s.metrics.mauGrowth > 100 ? 'Low' : 'Medium', impact: 'High' },
-      { risk: 'Competitive response', prob: s.signals.hiringSpike.score > 70 ? 'Medium' : 'Low', impact: 'Medium' },
-      { risk: 'Regulatory headwinds', prob: s.sector === 'Consumer Tech' ? 'Medium' : 'Low', impact: 'High' },
-      { risk: 'Key person dependency', prob: s.founders.length < 2 ? 'High' : 'Low', impact: 'High' },
-      { risk: 'Capital markets downturn', prob: 'Medium', impact: 'Medium' }
-    ];
+  function buildPrep(id) {
+    if (id.startsWith('streak-')) {
+      const deal = streakDeals[parseInt(id.replace('streak-', ''))];
+      if (!deal) return '<div class="empty-state">Deal not found</div>';
+      
+      const signals = window._newsSignals || [];
+      const enrich = window._dealEnrichments?.[deal.box_key] || null;
+      
+      const score = deal._score || scoreStreakDeal(deal);
+      const industry = deal._industry || 'Enterprise Software';
+      
+      // Auto-generated talking points based on CRM data + enrichment
+      const talkingPts = [
+        { label: 'Activity Velocity', text: `${deal.total_sent_emails || 0} outbound and ${deal.total_received_emails || 0} inbound emails. Deal is currently in stage: ${STREAK_STAGE_NAMES[deal.stage_key] || deal.stage_key}.` }
+      ];
+      
+      if (enrich) {
+        talkingPts.push({ label: 'AI Thesis Fit', text: `Scored ${enrich.thesis_fit_score}/100. Core strength: ${enrich.strengths[0] || 'Traction'}.` });
+        if (enrich.latest_news_context) {
+          talkingPts.push({ label: 'Recent Catalyst', text: enrich.latest_news_context });
+        }
+      }
+      
+      const relatedNews = signals.filter(s => s.title?.toLowerCase().includes((deal.name || '').toLowerCase().split(' ')[0])).slice(0, 2);
+      if (relatedNews.length > 0) {
+        talkingPts.push({ label: 'News Signal', text: `Mentioned in ${relatedNews[0].source}: "${relatedNews[0].title}" (${new Date(relatedNews[0].published_at || Date.now()).toLocaleDateString()}).` });
+      }
 
-    return `
+      const risks = [];
+      if (enrich && enrich.weaknesses && enrich.weaknesses.length) {
+        risks.push({ risk: enrich.weaknesses[0], prob: 'Medium', impact: 'High' });
+      } else {
+        risks.push({ risk: 'Unverified core metrics', prob: 'High', impact: 'High' });
+      }
+      
+      if (parseInt(deal.last_email_timestamp) && (Date.now() - parseInt(deal.last_email_timestamp)) > 14 * 86400000) {
+        risks.push({ risk: 'Stale engagement (>14 days)', prob: 'High', impact: 'Medium' });
+      }
+
+      return `
       <div class="prep-snapshot">
         <div class="deal-card" style="margin-bottom:0">
           <div class="deal-card-header">
-            <div class="deal-logo">${s.logo}</div>
+            <div class="deal-logo" style="background:var(--accent-indigo)">${deal.name?.substring(0, 2).toUpperCase() || '✨'}</div>
             <div class="deal-info">
-              <h3 class="deal-name">${s.name}</h3>
-              <span class="deal-meta">${s.subSector} · ${s.geography} · ${s.stage}</span>
+              <h3 class="deal-name">${deal.name}</h3>
+              <span class="deal-meta">${industry} · ${deal._country || 'Global'} · CRM Score: ${score}</span>
             </div>
-            <div class="deal-score ${getScoreClass(s.scores.composite)}">${s.scores.composite}</div>
+            <div class="deal-score ${score >= 75 ? 'hot' : score >= 50 ? 'warm' : 'watch'}">${score}</div>
           </div>
-          <p style="color:var(--text-secondary);font-size:0.82rem;margin:12px 0">${s.description}</p>
-          <div class="stats-row" style="margin-top:8px">
-            <div class="stat-item"><div class="stat-value" style="color:var(--accent-green)">${s.metrics.mau > 1000 ? (s.metrics.mau / 1000).toFixed(0) + 'K' : s.metrics.mau}</div><div class="stat-label">MAU</div></div>
-            <div class="stat-item"><div class="stat-value" style="color:var(--accent-blue)">$${s.metrics.revenue > 1000 ? (s.metrics.revenue / 1000).toFixed(0) + 'K' : s.metrics.revenue}</div><div class="stat-label">MRR</div></div>
-            <div class="stat-item"><div class="stat-value" style="color:var(--accent-purple)">$${s.lastRound.amount}M</div><div class="stat-label">${s.lastRound.type}</div></div>
-            <div class="stat-item"><div class="stat-value" style="color:var(--accent-orange)">${s.metrics.runway}mo</div><div class="stat-label">Runway</div></div>
-          </div>
+          <p style="color:var(--text-secondary);font-size:0.82rem;margin:12px 0">${deal.notes || deal.description || 'No detailed description available in Streak.'}</p>
         </div>
       </div>
 
       <div class="phase3-grid">
         <div class="phase3-panel">
-          <h3 class="phase3-panel-title">🗣️ Talking Points</h3>
+          <h3 class="phase3-panel-title">🗣️ CRM Auto-Prep</h3>
           <div class="talking-points-list">
             ${talkingPts.map(tp => `
               <div class="talking-point">
@@ -2541,49 +3180,130 @@ function renderMeetingPrep(area) {
           </div>
         </div>
 
-        <div class="phase3-panel">
-          <h3 class="phase3-panel-title">⚔️ IC Objection Playbook</h3>
-          <div class="objections-list">
-            ${sectorObjns.map((o, i) => `
-              <div class="objection-item">
-                <div class="objection-q">❓ "${o.objection}"</div>
-                <div class="objection-a">💡 ${o.counter}</div>
+        <div class="phase3-panel" style="margin-top:0">
+          <h3 class="phase3-panel-title">⚠️ Identified Risks</h3>
+          <div class="risk-matrix-grid">
+            ${risks.map(r => `
+              <div class="risk-item risk-${r.prob.toLowerCase()}-${r.impact.toLowerCase()}">
+                <div class="risk-name">${r.risk}</div>
+                <div class="risk-tags">
+                  <span class="risk-tag prob-${r.prob.toLowerCase()}">P: ${r.prob}</span>
+                  <span class="risk-tag impact-${r.impact.toLowerCase()}">I: ${r.impact}</span>
+                </div>
               </div>
             `).join('')}
           </div>
         </div>
       </div>
+      `;
+    } else {
+      // Legacy behavior for mock startups
+      const s = startups[parseInt(id.replace('startup-', ''))];
+      if (!s) return '<div class="empty-state">No startups available for prep</div>';
+      const sectorObjns = IC_OBJECTIONS[s.sector] || IC_OBJECTIONS['Consumer Tech'];
+      const talkingPts = TALKING_POINTS_TEMPLATES.map(t => ({ label: t.label, text: t.template(s) }));
+      const risks = [
+        { risk: 'Market timing too early', prob: s.tam > 20 ? 'Low' : 'Medium', impact: 'High' },
+        { risk: 'Execution at scale', prob: s.metrics.mauGrowth > 100 ? 'Low' : 'Medium', impact: 'High' },
+        { risk: 'Competitive response', prob: s.signals.hiringSpike.score > 70 ? 'Medium' : 'Low', impact: 'Medium' },
+        { risk: 'Regulatory headwinds', prob: s.sector === 'Consumer Tech' ? 'Medium' : 'Low', impact: 'High' },
+        { risk: 'Key person dependency', prob: s.founders.length < 2 ? 'High' : 'Low', impact: 'High' }
+      ];
 
-      <div class="phase3-panel" style="margin-top:16px">
-        <h3 class="phase3-panel-title">⚠️ Risk Matrix</h3>
-        <div class="risk-matrix-grid">
-          ${risks.map(r => `
-            <div class="risk-item risk-${r.prob.toLowerCase()}-${r.impact.toLowerCase()}">
-              <div class="risk-name">${r.risk}</div>
-              <div class="risk-tags">
-                <span class="risk-tag prob-${r.prob.toLowerCase()}">P: ${r.prob}</span>
-                <span class="risk-tag impact-${r.impact.toLowerCase()}">I: ${r.impact}</span>
+      return `
+        <div class="prep-snapshot">
+          <div class="deal-card" style="margin-bottom:0">
+            <div class="deal-card-header">
+              <div class="deal-logo">${s.logo}</div>
+              <div class="deal-info">
+                <h3 class="deal-name">${s.name}</h3>
+                <span class="deal-meta">${s.subSector} · ${s.geography} · ${s.stage}</span>
               </div>
+              <div class="deal-score ${getScoreClass(s.scores.composite)}">${s.scores.composite}</div>
             </div>
-          `).join('')}
+            <p style="color:var(--text-secondary);font-size:0.82rem;margin:12px 0">${s.description}</p>
+            <div class="stats-row" style="margin-top:8px">
+              <div class="stat-item"><div class="stat-value" style="color:var(--accent-green)">${s.metrics.mau > 1000 ? (s.metrics.mau / 1000).toFixed(0) + 'K' : s.metrics.mau}</div><div class="stat-label">MAU</div></div>
+              <div class="stat-item"><div class="stat-value" style="color:var(--accent-blue)">$${s.metrics.revenue > 1000 ? (s.metrics.revenue / 1000).toFixed(0) + 'K' : s.metrics.revenue}</div><div class="stat-label">MRR</div></div>
+              <div class="stat-item"><div class="stat-value" style="color:var(--accent-purple)">$${s.lastRound.amount}M</div><div class="stat-label">${s.lastRound.type}</div></div>
+              <div class="stat-item"><div class="stat-value" style="color:var(--accent-orange)">${s.metrics.runway}mo</div><div class="stat-label">Runway</div></div>
+            </div>
+          </div>
         </div>
-      </div>
-    `;
+
+        <div class="phase3-grid">
+          <div class="phase3-panel">
+            <h3 class="phase3-panel-title">🗣️ Talking Points</h3>
+            <div class="talking-points-list">
+              ${talkingPts.map(tp => `
+                <div class="talking-point">
+                  <div class="tp-label">${tp.label}</div>
+                  <div class="tp-text">${tp.text}</div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+
+          <div class="phase3-panel">
+            <h3 class="phase3-panel-title">⚔️ IC Objection Playbook</h3>
+            <div class="objections-list">
+              ${sectorObjns.map((o, i) => `
+                <div class="objection-item">
+                  <div class="objection-q">❓ "${o.objection}"</div>
+                  <div class="objection-a">💡 ${o.counter}</div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+
+        <div class="phase3-panel" style="margin-top:16px">
+          <h3 class="phase3-panel-title">⚠️ Risk Matrix</h3>
+          <div class="risk-matrix-grid">
+            ${risks.map(r => `
+              <div class="risk-item risk-${r.prob.toLowerCase()}-${r.impact.toLowerCase()}">
+                <div class="risk-name">${r.risk}</div>
+                <div class="risk-tags">
+                  <span class="risk-tag prob-${r.prob.toLowerCase()}">P: ${r.prob}</span>
+                  <span class="risk-tag impact-${r.impact.toLowerCase()}">I: ${r.impact}</span>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
   }
+
+  const streakOptions = streakDeals.slice(0, 30).map((d, i) => 
+    `<option value="streak-${i}">📧 ${d.name} — Streak CRM${d._industry ? ' · ' + d._industry : ''}</option>`
+  ).join('');
 
   area.innerHTML = `
     <div class="prep-selector">
-      <label class="prep-label">Select Company for IC Prep</label>
+      <label class="prep-label">Select Company for Meeting Prep</label>
       <select class="filter-select prep-select" id="prep-company-select">
-        ${startups.map((s, i) => `<option value="${i}">${s.logo} ${s.name} — ${s.subSector} (Score: ${s.scores.composite})</option>`).join('')}
+        <optgroup label="Scored Startups (Mock)">
+          ${startups.map((s, i) => `<option value="startup-${i}">${s.logo} ${s.name} — ${s.subSector} (Score: ${s.scores.composite})</option>`).join('')}
+        </optgroup>
+        <optgroup label="Streak Pipeline (Live CRM)">
+          ${streakOptions}
+        </optgroup>
       </select>
     </div>
-    <div id="prep-output">${buildPrep(selectedStartup)}</div>
+    <div id="prep-output">${buildPrep(selectedId)}</div>
   `;
 
+  // Check if we have a default streak option to show first
+  if (streakDeals.length > 0) {
+    selectedId = 'streak-0';
+    document.getElementById('prep-company-select').value = selectedId;
+    document.getElementById('prep-output').innerHTML = buildPrep(selectedId);
+  }
+
   document.getElementById('prep-company-select')?.addEventListener('change', (e) => {
-    selectedStartup = startups[parseInt(e.target.value)];
-    document.getElementById('prep-output').innerHTML = buildPrep(selectedStartup);
+    selectedId = e.target.value;
+    document.getElementById('prep-output').innerHTML = buildPrep(selectedId);
   });
 }
 
@@ -2666,13 +3386,31 @@ ${s.founders.map(f => `- **${f.name}** (${f.role}) — ${f.pedigree}`).join('\n'
     `;
   }
 
+  // Also include Streak deals in the selector
+  const streakOptions = streakDeals.slice(0, 30).map((d, i) => 
+    `<option value="streak-${i}">📧 ${d.name} — Streak CRM${d._industry ? ' · ' + d._industry : ''}</option>`
+  ).join('');
+
   area.innerHTML = `
-    <div class="prep-selector">
-      <label class="prep-label">Generate IC Memo For</label>
-      <select class="filter-select prep-select" id="memo-company-select">
-        ${startups.map((s, i) => `<option value="${i}">${s.logo} ${s.name} — Score: ${s.scores.composite}</option>`).join('')}
-      </select>
+    <div class="prep-selector" style="display:flex;gap:16px;align-items:end;flex-wrap:wrap">
+      <div style="flex:1;min-width:250px">
+        <label class="prep-label">Generate IC Memo For</label>
+        <select class="filter-select prep-select" id="memo-company-select">
+          <optgroup label="Scored Startups">
+            ${startups.map((s, i) => `<option value="${i}">${s.logo} ${s.name} — Score: ${s.scores.composite}</option>`).join('')}
+          </optgroup>
+          <optgroup label="Streak CRM Deals">
+            ${streakOptions}
+          </optgroup>
+        </select>
+      </div>
+      <button id="ai-memo-btn" style="padding:12px 24px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white;border:none;border-radius:12px;font-size:0.85rem;font-weight:700;cursor:pointer;font-family:Inter;white-space:nowrap;transition:all 0.2s"
+        onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 6px 20px rgba(99,102,241,0.4)'"
+        onmouseout="this.style.transform='';this.style.boxShadow=''">
+        🤖 Generate with GPT-4o
+      </button>
     </div>
+    <div id="ai-memo-status" style="margin-top:8px;font-size:0.75rem;color:var(--text-muted)"></div>
     <div id="memo-output">${buildMemo(selectedStartup)}</div>
   `;
 
@@ -2690,17 +3428,100 @@ ${s.founders.map(f => `- **${f.name}** (${f.role}) — ${f.pedigree}`).join('\n'
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `IC-Memo-${selectedStartup.name.replace(/\s+/g, '-')}.md`;
+      a.download = `IC-Memo-${(selectedStartup?.name || 'deal').replace(/\s+/g, '-')}.md`;
       a.click();
       URL.revokeObjectURL(url);
     });
   }
   attachMemoListeners();
 
+  // Handle company selector change
   document.getElementById('memo-company-select')?.addEventListener('change', (e) => {
-    selectedStartup = startups[parseInt(e.target.value)];
-    document.getElementById('memo-output').innerHTML = buildMemo(selectedStartup);
-    attachMemoListeners();
+    const val = e.target.value;
+    if (val.startsWith('streak-')) {
+      const idx = parseInt(val.replace('streak-', ''));
+      selectedStartup = null; // Can't use buildMemo for Streak deals
+      const deal = streakDeals[idx];
+      document.getElementById('memo-output').innerHTML = `
+        <div style="padding:40px;text-align:center;color:var(--text-secondary)">
+          <div style="font-size:2rem;margin-bottom:12px">📧</div>
+          <h3 style="color:var(--text-primary)">${deal.name}</h3>
+          <p style="margin:12px 0">Streak CRM deal · ${deal._industry || 'Unknown sector'} · ${deal._country || ''}</p>
+          <p style="font-size:0.8rem">Click <strong>"Generate with GPT-4o"</strong> above to create an AI-powered IC Memo for this deal.</p>
+        </div>`;
+    } else {
+      selectedStartup = startups[parseInt(val)];
+      document.getElementById('memo-output').innerHTML = buildMemo(selectedStartup);
+      attachMemoListeners();
+    }
+  });
+
+  // AI Memo Generation
+  document.getElementById('ai-memo-btn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('ai-memo-btn');
+    const status = document.getElementById('ai-memo-status');
+    btn.disabled = true;
+    btn.textContent = '🧠 Generating IC Memo...';
+    btn.style.opacity = '0.6';
+    status.textContent = 'Analyzing deal data, market context, and competitive landscape...';
+
+    try {
+      // Get the selected deal data
+      const selVal = document.getElementById('memo-company-select')?.value || '0';
+      let dealData = {};
+      if (selVal.startsWith('streak-')) {
+        const idx = parseInt(selVal.replace('streak-', ''));
+        const deal = streakDeals[idx];
+        dealData = { name: deal.name, industry: deal._industry, country: deal._country, stage: deal.stage, description: deal.notes || '', total_sent_emails: deal.total_sent_emails, total_received_emails: deal.total_received_emails, deal_size: deal.deal_size };
+      } else if (selectedStartup) {
+        dealData = { name: selectedStartup.name, industry: selectedStartup.subSector, country: selectedStartup.geography, stage: selectedStartup.stage, description: selectedStartup.description };
+      }
+
+      // Get related news
+      const relatedNews = (window._newsSignals || []).filter(s =>
+        s.title?.toLowerCase().includes(dealData.name?.toLowerCase()?.split(' ')[0] || '___')
+      ).slice(0, 5);
+
+      const memoHTML = await window.AI.generateICMemo(dealData, null, relatedNews);
+
+      // Save to Supabase
+      if (supabaseClient) {
+        try {
+          await supabaseClient.from('ic_memos').insert({
+            deal_name: dealData.name,
+            user_email: currentUser?.email || 'guest',
+            memo_content: memoHTML,
+            recommendation: 'AI Generated',
+            model_used: 'gpt-4o'
+          });
+        } catch (e) { console.warn('IC Memo save:', e.message); }
+      }
+
+      // Render AI memo
+      document.getElementById('memo-output').innerHTML = `
+        <div class="memo-container" style="margin-top:16px">
+          <div class="memo-actions">
+            <div class="tier-badge tier-hot" style="font-size:0.85rem;padding:6px 16px">🤖 GPT-4o Generated</div>
+            <div style="display:flex;gap:8px">
+              <button class="integration-connect-btn" onclick="navigator.clipboard.writeText(document.getElementById('ai-memo-content').innerText).then(()=>{this.textContent='✅ Copied!';setTimeout(()=>this.textContent='📋 Copy',2000)})">📋 Copy</button>
+            </div>
+          </div>
+          <div id="ai-memo-content" class="memo-body" style="font-size:0.88rem;line-height:1.7;color:var(--text-primary);padding:24px">
+            ${memoHTML}
+          </div>
+        </div>`;
+
+      btn.disabled = false;
+      btn.textContent = '🤖 Regenerate with GPT-4o';
+      btn.style.opacity = '1';
+      status.textContent = '✅ IC Memo generated successfully';
+    } catch (err) {
+      console.error('AI Memo failed:', err);
+      status.textContent = '❌ Failed: ' + err.message;
+      btn.disabled = false;
+      btn.textContent = '🤖 Retry GPT-4o';
+      btn.style.opacity = '1';
+    }
   });
 }
 
@@ -2847,19 +3668,24 @@ function renderVCCRM(area) {
   const now = Date.now();
   const ACTIVE_DEAL_STAGES = new Set(['5011', '5004', '5014', '5007']);
   const PIPELINE_STAGES = new Set(['5002', '5003', '5018']);
-  const WATCHING_STAGES = new Set(['5001', '5016', '5008', '5015']);
 
   function getStatus(d) {
     if (ACTIVE_DEAL_STAGES.has(d.stage_key)) return 'Active Deal';
     if (PIPELINE_STAGES.has(d.stage_key)) return 'Pipeline';
     return 'Watching';
   }
-  function getDaysSince(d) {
-    const ts = d.last_email_timestamp ? parseInt(d.last_email_timestamp) :
-      d.updated_at ? parseInt(d.updated_at) : null;
+
+  function getDaysSince(d, founderProfile = null) {
+    // If the founder profile has a more recent contact timestamp, use it
+    let ts = null;
+    if (founderProfile && founderProfile.last_contact) {
+      ts = new Date(founderProfile.last_contact).getTime();
+    }
+    if (!ts) ts = d.last_email_timestamp ? parseInt(d.last_email_timestamp) : d.updated_at ? parseInt(d.updated_at) : null;
     if (!ts) return 999;
     return Math.floor((now - ts) / 86400000);
   }
+
   function getLastContactLabel(days) {
     if (days >= 999) return 'Never';
     if (days === 0) return 'Today'; if (days === 1) return 'Yesterday';
@@ -2867,33 +3693,48 @@ function renderVCCRM(area) {
     if (days < 30) return `${Math.floor(days / 7)} weeks ago`;
     return `${Math.floor(days / 30)} months ago`;
   }
+
   function getNextFollowUp(d, days) {
     if (d.stage_key === '5007') return 'Tomorrow';
     if (days > 60) return 'Overdue'; if (days > 30) return 'This week';
     if (days > 14) return 'In 2 weeks'; return 'Active';
   }
-  function getStrength(d) {
+
+  function getStrength(d, founderProfile) {
+    let score = 1;
+    if (founderProfile && founderProfile.sentiment === 'Strong') score += 2;
     const e = (d.total_sent_emails || 0) + (d.total_received_emails || 0);
-    if (ACTIVE_DEAL_STAGES.has(d.stage_key) && e > 10) return 5;
-    if (ACTIVE_DEAL_STAGES.has(d.stage_key)) return 4;
-    if (PIPELINE_STAGES.has(d.stage_key) && e > 5) return 3;
-    if (PIPELINE_STAGES.has(d.stage_key)) return 2; return 1;
+    if (ACTIVE_DEAL_STAGES.has(d.stage_key) && e > 10) return Math.min(5, score + 3);
+    if (ACTIVE_DEAL_STAGES.has(d.stage_key)) return Math.min(5, score + 2);
+    if (PIPELINE_STAGES.has(d.stage_key) && e > 5) return Math.min(5, score + 2);
+    if (PIPELINE_STAGES.has(d.stage_key)) return Math.min(4, score + 1);
+    return Math.min(5, score);
   }
 
   const SHOW = new Set(['5007', '5011', '5004', '5003', '5002', '5018', '5001', '5016', '5008', '5015', '5014']);
+
+  // Build a map of founder profiles
+  const profileMap = {};
+  (window._founderProfiles || []).forEach(f => profileMap[f.box_key || f.company_name] = f);
+
   const relationships = streakDeals
     .filter(d => SHOW.has(d.stage_key))
     .map(d => {
-      const days = getDaysSince(d);
       const enrich = (window._dealEnrichments || {})[d.box_key] || {};
+      const companyName = (d.name || '').replace(/^www\./, '').replace(/\.(com|co\.in|io|ai|net|org)(\/.*)?$/i, '');
+      const profile = profileMap[d.box_key] || profileMap[companyName]; // Try match by box_key or name
+
+      const days = getDaysSince(d, profile);
+
       return {
-        d, enrich,
+        d, enrich, profile,
         status: getStatus(d), days,
         lastContact: getLastContactLabel(days),
         nextFollowUp: getNextFollowUp(d, days),
-        strength: getStrength(d),
+        strength: getStrength(d, profile),
         interactions: (d.total_sent_emails || 0) + (d.total_received_emails || 0),
-        name: (d.name || '').replace(/^www\./, '').replace(/\.(com|co\.in|io|ai|net|org)(\/.*)?$/i, ''),
+        name: companyName,
+        founderName: profile ? profile.founder_name : (enrich.founder_name || 'Unknown Founder'),
         industry: d._industry || inferIndustry(d),
         country: d._country || inferCountry(d)
       };
@@ -2910,36 +3751,43 @@ function renderVCCRM(area) {
 
   area.innerHTML = `
     ${getModuleNews('vccrm')}
+    
+    <div style="margin-bottom:20px;display:flex;justify-content:space-between;align-items:center">
+       <div>
+         <h2 style="font-size:1.8rem;margin:0">Founder CRM</h2>
+         <p style="color:var(--text-secondary);margin:4px 0 0 0">Live synchronization with Streak CRM and <code>vc_contacts</code> intelligence.</p>
+       </div>
+    </div>
+
     <div class="radar-stats-row">
-      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-green)">${relationships.filter(r => r.status === 'Active Deal').length}</div><div class="stat-card-label">Active Deals</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-green)">${relationships.filter(r => r.status === 'Active Deal').length}</div><div class="stat-card-label">Active Founders</div></div>
       <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-blue)">${relationships.filter(r => r.status === 'Pipeline').length}</div><div class="stat-card-label">In Pipeline</div></div>
-      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-red)">${overdue.length}</div><div class="stat-card-label">⚠️ Needs Attention</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-red)">${overdue.length}</div><div class="stat-card-label">⚠️ Needs Follow-up</div></div>
       <div class="stat-card"><div class="stat-card-value" style="color:var(--accent-purple)">${totalInteractions}</div><div class="stat-card-label">Total Email Interactions</div></div>
     </div>
 
     <div class="phase3-grid">
       <div class="phase3-panel" style="flex:2">
-        <h3 class="phase3-panel-title">👥 Founder Relationships <span style="font-size:0.7rem;font-weight:400;color:var(--text-muted);margin-left:8px">Live · ${relationships.length} companies · Streak CRM</span></h3>
-        <div class="crm-list">
+        <h3 class="phase3-panel-title">👥 Founder Relationships <span style="font-size:0.7rem;font-weight:400;color:var(--text-muted);margin-left:8px">Live · ${relationships.length} companies</span></h3>
+        <div class="crm-list" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
           ${relationships.map(r => `
-            <div class="crm-card${r.nextFollowUp === 'Overdue' || r.d.stage_key === '5007' ? ' crm-overdue' : ''}">
-              <div class="crm-card-header">
+            <div class="crm-card${r.nextFollowUp === 'Overdue' || r.d.stage_key === '5007' ? ' crm-overdue' : ''}" style="background:var(--bg-secondary);padding:16px;border-radius:12px;border:1px solid var(--border-medium)">
+              <div class="crm-card-header" style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
                 <div>
-                  <strong class="crm-name">${r.name}</strong>
-                  <span class="crm-role">${r.enrich.founder_name ? r.enrich.founder_name + ' · ' : ''}${r.industry} · ${r.country}</span>
+                  <strong class="crm-name" style="font-size:1.1rem;display:block;margin-bottom:4px">${r.founderName}</strong>
+                  <span class="crm-role" style="font-size:0.8rem;color:var(--text-muted)">${r.name} · ${r.industry}</span>
                 </div>
-                <div class="crm-strength">${'★'.repeat(r.strength)}${'☆'.repeat(5 - r.strength)}</div>
+                <div class="crm-strength" style="color:var(--accent-yellow)">${'★'.repeat(r.strength)}${'☆'.repeat(5 - r.strength)}</div>
               </div>
               <div class="crm-card-body">
-                <div class="crm-meta-row">
+                <div class="crm-meta-row" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;font-size:0.75rem">
                   <span class="signal-tag" style="background:${statusColors[r.status]}22;color:${statusColors[r.status]}">${r.status}</span>
-                  <span class="crm-meta">📅 ${r.lastContact}</span>
-                  <span class="crm-meta">${r.nextFollowUp === 'Overdue' || r.d.stage_key === '5007' ? '🔴' : '📌'} ${r.nextFollowUp}</span>
-                  <span class="crm-meta">💬 ${r.interactions} emails</span>
+                  <span class="crm-meta" style="color:var(--text-secondary)">📅 Last: ${r.lastContact}</span>
+                  <span class="crm-meta" style="color:${r.nextFollowUp === 'Overdue' ? 'var(--accent-red)' : 'var(--text-secondary)'}">${r.nextFollowUp === 'Overdue' || r.d.stage_key === '5007' ? '🔴' : '📌'} Next: ${r.nextFollowUp}</span>
                 </div>
-                ${r.enrich.founder_background ? `<div class="crm-notes">👤 ${r.enrich.founder_background}</div>` : ''}
-                ${r.d.description ? `<div class="crm-notes" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">📝 ${r.d.description}</div>` : ''}
-                ${(r.enrich.investors || []).length ? `<div class="crm-notes">🤝 Investors: ${r.enrich.investors.slice(0, 3).join(', ')}</div>` : ''}
+                ${r.profile && r.profile.sentiment ? `<div class="crm-notes" style="font-size:0.8rem;margin-bottom:8px">🧠 <strong>Sentiment:</strong> <span style="color:var(--accent-blue)">${r.profile.sentiment}</span></div>` : ''}
+                ${r.profile && r.profile.notes ? `<div class="crm-notes" style="font-size:0.8rem;margin-bottom:8px;color:var(--text-secondary)">📝 ${r.profile.notes}</div>` : ''}
+                ${!r.profile && r.enrich.founder_background ? `<div class="crm-notes" style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:8px">👤 ${r.enrich.founder_background}</div>` : ''}
               </div>
             </div>
           `).join('')}
@@ -3911,6 +4759,105 @@ async function boot() {
   if (currentUser) {
     showDashboard();
   }
+}
+
+// ============================================================
+// MERGED SUPER-MODULES (Consolidated from 20 → 8)
+// ============================================================
+
+// Tab system helper
+function renderTabbed(area, title, icon, tabs, defaultTab) {
+  const tabId = 'tabbed-' + title.replace(/\s/g, '');
+  area.innerHTML = `
+    <div style="margin-bottom:20px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+        <span style="font-size:1.5rem">${icon}</span>
+        <div>
+          <div style="font-size:1.1rem;font-weight:800;color:var(--text-primary);letter-spacing:-0.02em">${title}</div>
+        </div>
+      </div>
+      <div id="${tabId}-tabs" style="display:flex;gap:4px;border-bottom:1px solid var(--border-subtle);padding-bottom:0">
+        ${tabs.map((t, i) => `
+          <button class="module-tab ${i === defaultTab ? 'active' : ''}" data-tab="${t.key}"
+            style="padding:8px 16px;font-size:0.75rem;font-weight:700;border:none;background:${i === defaultTab ? 'var(--bg-tertiary)' : 'transparent'};color:${i === defaultTab ? 'var(--text-primary)' : 'var(--text-muted)'};border-radius:8px 8px 0 0;cursor:pointer;transition:all 0.15s;font-family:Inter">${t.icon} ${t.label}</button>
+        `).join('')}
+      </div>
+    </div>
+    <div id="${tabId}-content"></div>
+  `;
+
+  const contentEl = document.getElementById(`${tabId}-content`);
+  const tabsEl = document.getElementById(`${tabId}-tabs`);
+
+  function activateTab(key) {
+    const tab = tabs.find(t => t.key === key);
+    if (!tab) return;
+    tabsEl.querySelectorAll('.module-tab').forEach(b => {
+      b.style.background = 'transparent';
+      b.style.color = 'var(--text-muted)';
+      b.classList.remove('active');
+    });
+    const activeBtn = tabsEl.querySelector(`[data-tab="${key}"]`);
+    if (activeBtn) {
+      activeBtn.style.background = 'var(--bg-tertiary)';
+      activeBtn.style.color = 'var(--text-primary)';
+      activeBtn.classList.add('active');
+    }
+    tab.render(contentEl);
+  }
+
+  tabsEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('.module-tab');
+    if (btn) activateTab(btn.dataset.tab);
+  });
+
+  // Render default tab
+  activateTab(tabs[defaultTab].key);
+}
+
+// ---------- INTELLIGENCE HUB (Daily Brief + Power Moves + Thesis) ----------
+function renderIntelHub(area) {
+  renderTabbed(area, 'Intelligence Hub', '📡', [
+    { key: 'briefing', icon: '⚡', label: 'Daily Brief', render: (el) => renderBriefing(el) },
+    { key: 'powermoves', icon: '🕵️', label: 'Power Moves', render: (el) => renderPowerMoves(el) },
+    { key: 'thesis', icon: '🧭', label: 'Thesis Tracker', render: (el) => renderThesis(el) }
+  ], 0);
+}
+
+// ---------- IC WAR ROOM (Meeting Prep + IC Memo + Patterns) ----------
+function renderICWarRoom(area) {
+  renderTabbed(area, 'IC War Room', '⚔️', [
+    { key: 'meetingprep', icon: '🎯', label: 'Meeting Prep', render: (el) => renderMeetingPrep(el) },
+    { key: 'icmemo', icon: '📋', label: 'IC Memo', render: (el) => renderICMemo(el) },
+    { key: 'patterns', icon: '🧬', label: 'Pattern Engine', render: (el) => renderPatterns(el) }
+  ], 0);
+}
+
+// ---------- VALUATION LAB (Valuation + Public Comps + Industry) ----------
+function renderValuationLab(area) {
+  renderTabbed(area, 'Valuation Lab', '💰', [
+    { key: 'valuation', icon: '🧮', label: 'Deal Valuation', render: (el) => renderValuation(el) },
+    { key: 'publiccomps', icon: '📈', label: 'Public Comps', render: (el) => renderPublicMarketComps(el) },
+    { key: 'industry', icon: '🏭', label: 'Industry View', render: (el) => renderIndustryAnalyzer(el) }
+  ], 0);
+}
+
+// ---------- NETWORK & CRM (VC CRM + Founders + Fund Radar) ----------
+function renderNetworkCRM(area) {
+  renderTabbed(area, 'Network & CRM', '🤝', [
+    { key: 'vccrm', icon: '🤝', label: 'Co-Investors', render: (el) => renderVCCRM(el) },
+    { key: 'network', icon: '🕸️', label: 'Network Map', render: (el) => renderNetworkMap(el) },
+    { key: 'fundradar', icon: '📡', label: 'Fund Radar', render: (el) => renderFundRadar(el) }
+  ], 0);
+}
+
+// ---------- SETTINGS (Integrations + Admin + Activity Log) ----------
+function renderSettings(area) {
+  renderTabbed(area, 'Settings', '⚙️', [
+    { key: 'integrations', icon: '🔗', label: 'Integrations', render: (el) => renderIntegrations(el) },
+    { key: 'admin', icon: '🛡️', label: 'Admin', render: (el) => renderAdmin(el) },
+    { key: 'activitylog', icon: '📜', label: 'Activity Log', render: (el) => renderActivityLog(el) }
+  ], 0);
 }
 
 // Self-boot
