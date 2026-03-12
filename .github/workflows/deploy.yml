@@ -76,6 +76,7 @@ jobs:
           }
           upload index.html
           upload app.js
+          upload ai.js
           upload styles.css
           upload config.js
           upload data.js
