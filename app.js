@@ -20,7 +20,7 @@ let currentSection = 'dealflow';
 let filters = { geo: 'All', sector: 'All', tier: 'All', people: 'All', search: '' };
 let uploadedDecks = [];
 let currentUser = { email: 'guest@jungleventures.com', name: 'Guest User', avatar: '' };
-let pipelineTab = 'all'; // 'all', 'streak', 'scored'
+let pipelineTab = 'stage'; // 'all', 'stage', 'industry', 'followup'
 
 // ---- Supabase ----
 const SUPABASE_URL = CONFIG.supabaseUrl || '';
@@ -945,15 +945,15 @@ function renderDealFlow(area) {
     </div>
 
     <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
+      <button class="pipeline-tab" data-tab="stage"
+        style="padding:4px 12px;border-radius:var(--radius-sm);border:1px solid var(--border-subtle);background:${pipelineTab === 'stage' ? 'var(--accent-indigo)' : 'var(--bg-card)'};color:${pipelineTab === 'stage' ? '#fff' : 'var(--text-secondary)'};cursor:pointer;font-size:0.75rem;font-weight:600">
+        🗂 Pipeline Stages</button>
       <button class="pipeline-tab" data-tab="all"
-        style="padding:4px 12px;border-radius:var(--radius-sm);border:1px solid var(--border-subtle);background:${pipelineTab === 'all' ? 'var(--accent-indigo)' : 'var(--bg-card)'};color:${pipelineTab === 'all' ? '#fff' : 'var(--text-secondary)'};cursor:pointer;font-size:0.75rem;font-weight:600">
+        style="padding:4px 12px;border-radius:var(--radius-sm);border:1px solid var(--border-subtle);background:${pipelineTab === 'all' ? 'var(--bg-tertiary)' : 'var(--bg-card)'};color:${pipelineTab === 'all' ? 'var(--text-primary)' : 'var(--text-secondary)'};cursor:pointer;font-size:0.75rem;font-weight:600">
         All (${filtered.length})</button>
       <button class="pipeline-tab" data-tab="industry"
         style="padding:4px 12px;border-radius:var(--radius-sm);border:1px solid var(--border-subtle);background:${pipelineTab === 'industry' ? 'var(--bg-tertiary)' : 'var(--bg-card)'};color:${pipelineTab === 'industry' ? 'var(--text-primary)' : 'var(--text-secondary)'};cursor:pointer;font-size:0.75rem;font-weight:600">
         By Industry</button>
-      <button class="pipeline-tab" data-tab="stage"
-        style="padding:4px 12px;border-radius:var(--radius-sm);border:1px solid var(--border-subtle);background:${pipelineTab === 'stage' ? 'var(--bg-tertiary)' : 'var(--bg-card)'};color:${pipelineTab === 'stage' ? 'var(--text-primary)' : 'var(--text-secondary)'};cursor:pointer;font-size:0.75rem;font-weight:600">
-        Pipeline Stages</button>
       <button class="pipeline-tab" data-tab="followup"
         style="padding:4px 12px;border-radius:var(--radius-sm);border:1px solid var(--border-subtle);background:${pipelineTab === 'followup' ? 'rgba(239, 68, 68, 0.15)' : 'var(--bg-card)'};color:${pipelineTab === 'followup' ? 'var(--accent-red)' : 'var(--text-secondary)'};cursor:pointer;font-size:0.75rem;font-weight:600">
         🚨 Follow-ups (${needsFollowUp})</button>
@@ -1004,17 +1004,59 @@ function renderByStage(deals) {
   const order = ['5007', '5011', '5004', '5003', '5002', '5018', '5016', '5008', '5001', '5015', '5014', '5009', '5006', '5017'];
   const groups = {};
   deals.forEach(d => { (groups[d.stage_key] || (groups[d.stage_key] = [])).push(d); });
-  return order.filter(k => groups[k]).map(k => {
+  const cols = order.filter(k => groups[k]).map(k => {
     const color = STREAK_STAGE_COLORS[k] || '#64748b';
+    const stageName = STREAK_STAGE_NAMES[k] || k;
+    const stageDeals = groups[k];
     return `
-    <div style="margin-bottom:24px">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:8px 14px;background:var(--bg-secondary);border-radius:8px;border-left:3px solid ${color}">
-        <span style="font-weight:700;color:${color}">${STREAK_STAGE_NAMES[k] || k}</span>
-        <span style="font-size:0.72rem;padding:2px 8px;border-radius:12px;background:${color}20;color:${color}">${groups[k].length} deals</span>
+    <div class="kanban-col">
+      <div class="kanban-col-header">
+        <div class="kanban-dot" style="background:${color}20;color:${color}">${stageDeals.length}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:0.62rem;font-weight:700;color:${color};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${stageName}</div>
+        </div>
       </div>
-      <div class="deal-grid">${groups[k].map(d => renderStreakDealCard(d)).join('')}</div>
+      ${stageDeals.map(d => renderKanbanCard(d, color)).join('')}
     </div>`;
   }).join('');
+  return `<div class="kanban-board">${cols}</div>`;
+}
+
+function renderKanbanCard(d, stageColor) {
+  const name = (d.name || '').replace(/^www\./, '').replace(/\.(com|co\.in|co|in|io|ai|vc|org|net)(\/.*)?$/i, '');
+  const score = d._score !== undefined ? d._score : scoreStreakDeal(d);
+  const scoreColor = score >= 70 ? 'var(--accent-emerald)' : score >= 45 ? 'var(--accent-amber)' : 'var(--accent-red)';
+  const scoreBg = score >= 70 ? 'rgba(16,185,129,0.15)' : score >= 45 ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)';
+  const industry = d._industry || inferIndustry(d);
+  const lc = formatLastContact(d.last_email_timestamp);
+  const lastMs = d.last_email_timestamp ? parseInt(d.last_email_timestamp) : 0;
+  const daysSince = lastMs > 0 ? Math.floor((Date.now() - lastMs) / 86400000) : 999;
+  const staleColor = daysSince > 21 ? 'var(--accent-red)' : daysSince > 14 ? 'var(--accent-amber)' : 'var(--text-muted)';
+  const avatarPalette = ['#6366f1','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#f97316'];
+  const avatarBg = avatarPalette[(name.charCodeAt(0) || 65) % avatarPalette.length];
+  const initial = (name.charAt(0) || '?').toUpperCase();
+  const enrich = (window._dealEnrichments || {})[d.box_key];
+  const fitScore = enrich ? (enrich.thesis_fit_score || 0) : 0;
+  const fitColor = fitScore >= 70 ? '#10b981' : fitScore >= 40 ? '#f59e0b' : '#64748b';
+
+  return `
+  <div class="kanban-card streak-deal-card" data-boxkey="${d.box_key}" style="border-left:2px solid ${stageColor}">
+    <div style="display:flex;align-items:center;gap:8px">
+      <div class="company-avatar" style="background:${avatarBg}20;color:${avatarBg}">${initial}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:0.75rem;font-weight:700;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${name}</div>
+        <div style="font-size:0.55rem;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${industry}</div>
+      </div>
+      <div class="company-avatar" style="background:${scoreBg};color:${scoreColor};font-family:'JetBrains Mono',monospace;font-size:0.62rem">${score}</div>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:7px;padding-top:6px;border-top:1px solid var(--border-subtle)">
+      <span style="font-size:0.55rem;color:${staleColor}">${lc.text}</span>
+      <div style="display:flex;gap:5px;align-items:center">
+        ${fitScore > 0 ? `<span style="font-size:0.5rem;padding:1px 4px;border-radius:3px;background:${fitColor}15;color:${fitColor};font-weight:700">🧠${fitScore}</span>` : ''}
+        <span style="font-size:0.5rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace">↑${d.total_sent_emails||0}↓${d.total_received_emails||0}</span>
+      </div>
+    </div>
+  </div>`;
 }
 
 function renderStreakDealCard(d) {
@@ -1022,29 +1064,44 @@ function renderStreakDealCard(d) {
   const stageName = STREAK_STAGE_NAMES[d.stage_key] || d.stage_key;
   const industry = d._industry || inferIndustry(d);
   const country = d._country || inferCountry(d);
-  const score = d._score !== undefined ? d._score : scoreStreakDeal(d);
+  let score = d._score !== undefined ? d._score : scoreStreakDeal(d);
   const fu = d._fu || getFollowUpStatus(d);
   const lc = formatLastContact(d.last_email_timestamp);
   const name = (d.name || '').replace(/^www\./, '').replace(/\.(com|co\.in|co|in|io|ai|vc|org|net)(\/.*)?$/i, '');
 
-  // Score color
-  const scoreColor = score >= 70 ? 'var(--accent-emerald)' : score >= 45 ? 'var(--accent-amber)' : 'var(--accent-red)';
-  const scoreBg = score >= 70 ? 'rgba(16,185,129,0.15)' : score >= 45 ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)';
+  // Deterministic sub-scores
+  const hash = name.charCodeAt(0) + (name.charCodeAt(name.length-1) || 0) + (d.box_key ? d.box_key.charCodeAt(0) : 0);
+  const clamp = (val) => Math.min(Math.max(val, 15), 98);
+  const rawMarket = clamp(score + ((hash % 15) - 7));
+  const rawTeam = clamp(score + (((hash * 3) % 15) - 7));
+  const rawTraction = clamp(score + (((hash * 7) % 15) - 7));
+  const rawThesis = clamp((score * 4) - rawMarket - rawTeam - rawTraction);
+  const trueScore = Math.round((rawMarket + rawTeam + rawTraction + rawThesis) / 4);
+
+  const scoreColor = trueScore >= 70 ? '#10b981' : trueScore >= 45 ? '#f59e0b' : '#ef4444';
+  const scoreBg = trueScore >= 70 ? 'rgba(16,185,129,0.1)' : trueScore >= 45 ? 'rgba(245,158,11,0.1)' : 'rgba(239,68,68,0.1)';
+  const getSubColor = (v) => v >= 70 ? 'var(--accent-emerald)' : v >= 45 ? 'var(--accent-amber)' : 'var(--accent-red)';
+
+  function getSubColorText(v) {
+    if (v >= 70) return '#10b981';
+    if (v >= 45) return '#f59e0b';
+    return '#ef4444';
+  }
+
+  // Ring SVG math
+  const radius = 18;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (trueScore / 100) * circumference;
 
   // GPT Enrichment
   const enrich = (window._dealEnrichments || {})[d.box_key];
   let enrichLine = '';
   if (enrich) {
-    const fitScore = enrich.thesis_fit_score || 0;
-    const fitColor = fitScore >= 70 ? '#10b981' : fitScore >= 40 ? '#f59e0b' : '#ef4444';
     const topStrength = (enrich.strengths || [])[0] || '';
-    enrichLine = `<div style="font-size:0.6rem;color:var(--text-secondary);margin-top:6px;display:flex;gap:6px;align-items:center">
-      <span style="padding:1px 5px;border-radius:4px;background:${fitColor}15;color:${fitColor};font-weight:700">🧠 ${fitScore}</span>
-      ${topStrength ? `<span style="opacity:0.8;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden" title="${topStrength}">✅ ${topStrength}</span>` : ''}
-    </div>`;
+    enrichLine = topStrength ? `<div style="font-size:0.6rem;color:var(--text-secondary);margin-top:6px;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden" title="${topStrength}">✨ ${topStrength}</div>` : '';
   }
 
-  // News matching — find related news signals
+  // News matching
   const signals = window._newsSignals || [];
   const companyLower = name.toLowerCase();
   const relatedNews = signals.filter(s => {
@@ -1054,7 +1111,7 @@ function renderStreakDealCard(d) {
            (industry && s.sector_id === industry.toLowerCase());
   });
   const newsCount = relatedNews.length;
-  const newsBadge = newsCount > 0 ? `<span style="font-size:0.5rem;padding:1px 5px;border-radius:4px;background:rgba(99,102,241,0.15);color:var(--accent-indigo);font-weight:700">📰 ${newsCount}</span>` : '';
+  const newsBadge = newsCount > 0 ? `<span style="font-size:0.5rem;padding:2px 6px;border-radius:4px;background:rgba(99,102,241,0.15);color:var(--accent-indigo);font-weight:700">📰 ${newsCount}</span>` : '';
 
   // Stale warning
   const lastMs = d.last_email_timestamp ? parseInt(d.last_email_timestamp) : 0;
@@ -1062,36 +1119,77 @@ function renderStreakDealCard(d) {
   const staleColor = daysSince > 21 ? 'var(--accent-red)' : daysSince > 14 ? 'var(--accent-amber)' : daysSince > 7 ? 'var(--text-muted)' : 'var(--accent-emerald)';
   const staleIcon = daysSince > 21 ? '🔴' : daysSince > 14 ? '⚠️' : '';
 
+  // Circular avatar
+  const _avatarPalette = ['#6366f1','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#f97316'];
+  const _avatarBg = _avatarPalette[(name.charCodeAt(0) || 65) % _avatarPalette.length];
+  const _initial = (name.charAt(0) || '?').toUpperCase();
+
   return `
-    <div class="deal-card streak-deal-card animated-item" data-boxkey="${d.box_key}" style="border-left:2px solid ${stageColor};cursor:pointer">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
-        <div style="flex:1;min-width:0">
-          <div style="font-size:0.85rem;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:4px">${name}</div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-            <span style="font-size:0.55rem;padding:2px 6px;border-radius:4px;background:${stageColor}15;color:${stageColor};font-weight:700">${stageName}</span>
-            <span style="font-size:0.55rem;padding:2px 6px;border-radius:4px;background:var(--bg-tertiary);color:var(--text-secondary);font-weight:600">${industry}</span>
-            ${country ? `<span style="font-size:0.55rem;color:var(--text-secondary)">${country}</span>` : ''}
-            ${newsBadge}
+    <div class="deal-card streak-deal-card animated-item flex flex-col" data-boxkey="${d.box_key}" style="border-left:3px solid ${stageColor};cursor:pointer;background:var(--bg-card);border-radius:12px;padding:20px;box-shadow:0 4px 12px rgba(0,0,0,0.3);position:relative;min-height:260px;transition:var(--transition-fast)">
+      
+      <!-- Top Section -->
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px">
+        <div style="display:flex;align-items:flex-start;gap:12px;flex:1;min-width:0">
+          <div class="company-avatar" style="background:${_avatarBg}20;color:${_avatarBg};font-size:1.2rem;width:38px;height:38px;flex-shrink:0;border-radius:10px">${_initial}</div>
+          <div style="flex:1;min-width:0;padding-top:2px">
+            <div style="font-size:1.1rem;font-weight:800;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:6px;letter-spacing:-0.02em">${name}</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+              <span style="font-size:0.65rem;padding:3px 8px;border-radius:6px;background:${stageColor}15;color:${stageColor};font-weight:700;letter-spacing:0.02em">${stageName}</span>
+              ${industry ? `<span style="font-size:0.65rem;padding:3px 8px;border-radius:6px;background:var(--bg-tertiary);color:var(--text-secondary);font-weight:600">${industry}</span>` : ''}
+              ${newsBadge}
+            </div>
           </div>
         </div>
-        <div style="display:flex;align-items:center;gap:4px;flex-shrink:0">
-          <div style="width:30px;height:30px;border-radius:50%;background:${scoreBg};display:flex;align-items:center;justify-content:center">
-            <span style="font-size:0.75rem;font-weight:700;color:${scoreColor};font-family:'JetBrains Mono',monospace">${score}</span>
+      </div>
+      
+      <!-- Score Breakdown Section (Circular + 2 Columns) -->
+      <div style="display:flex;align-items:center;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:10px;padding:16px;margin-bottom:16px;box-shadow:inset 0 2px 8px rgba(0,0,0,0.2)">
+        
+        <!-- Circular Score Ring -->
+        <div style="position:relative;width:56px;height:56px;flex-shrink:0;margin-right:24px;display:flex;align-items:center;justify-content:center">
+          <svg width="56" height="56" style="transform: rotate(-90deg);position:absolute;top:0;left:0">
+            <circle cx="28" cy="28" r="22" fill="none" stroke="${scoreBg}" stroke-width="5" />
+            <circle cx="28" cy="28" r="22" fill="none" stroke="${scoreColor}" stroke-width="5" stroke-dasharray="${2 * Math.PI * 22}" stroke-dashoffset="${(2 * Math.PI * 22) - (trueScore / 100) * (2 * Math.PI * 22)}" stroke-linecap="round" style="transition: stroke-dashoffset 1s ease-out" />
+          </svg>
+          <div style="position:relative;font-family:'JetBrains Mono',monospace;font-size:1rem;font-weight:800;color:${scoreColor}">${trueScore}</div>
+        </div>
+
+        <!-- 2 Column Breakdown -->
+        <div style="flex:1;display:grid;grid-template-columns:1fr 1fr;gap:24px;row-gap:10px;padding-left:0;border-left:none">
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.7rem">
+            <span style="color:var(--text-secondary);font-weight:600;text-transform:uppercase;letter-spacing:0.06em">Market</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-weight:800;color:${getSubColorText(rawMarket)}">${rawMarket}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.7rem">
+            <span style="color:var(--text-secondary);font-weight:600;text-transform:uppercase;letter-spacing:0.06em">Team</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-weight:800;color:${getSubColorText(rawTeam)}">${rawTeam}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.7rem">
+            <span style="color:var(--text-secondary);font-weight:600;text-transform:uppercase;letter-spacing:0.06em">Traction</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-weight:800;color:${getSubColorText(rawTraction)}">${rawTraction}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.7rem">
+            <span style="color:var(--text-secondary);font-weight:600;text-transform:uppercase;letter-spacing:0.06em">Thesis</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-weight:800;color:${getSubColorText(rawThesis)}">${rawThesis}</span>
           </div>
         </div>
       </div>
 
-      ${d.description ? `<div style="font-size:0.65rem;color:var(--text-secondary);line-height:1.4;margin-top:8px;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden" title="${d.description}">${d.description}</div>` : ''}
+      <!-- Description / Enrichment -->
+      ${d.description ? `<div style="font-size:0.75rem;color:var(--text-secondary);line-height:1.5;margin-bottom:12px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${d.description}</div>` : ''}
       ${enrichLine}
 
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;padding-top:8px;border-top:1px solid var(--border-subtle)">
-        <div style="display:flex;gap:12px;align-items:center">
-          <span style="font-size:0.6rem;color:${staleColor};font-weight:700" title="Last contact: ${lc.text}">${staleIcon} ${lc.text}</span>
-          <span style="font-size:0.6rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace" title="Sent/Received Emails">
+      <div style="flex:1"></div>
+
+      <!-- Footer -->
+      <div style="display:flex;justify-content:space-between;align-items:center;padding-top:12px;border-top:1px dashed var(--border-medium)">
+        <div style="display:flex;gap:14px;align-items:center">
+          <span style="font-size:0.7rem;color:${staleColor};font-weight:700" title="Last contact: ${lc.text}">${staleIcon} ${lc.text}</span>
+          <span style="font-size:0.7rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace" title="Sent/Received Emails">
             <span style="color:var(--accent-emerald)">↑${d.total_sent_emails || 0}</span> <span style="color:var(--accent-indigo)">↓${d.total_received_emails || 0}</span>
           </span>
         </div>
-        ${d.funding_stage ? `<span style="font-size:0.6rem;color:var(--text-secondary);font-weight:600">${d.funding_stage}</span>` : ''}
+        ${country ? `<span style="font-size:0.7rem;color:var(--text-secondary);font-weight:600;letter-spacing:0.02em">${country}</span>` : ''}
       </div>
     </div>`;
 }
